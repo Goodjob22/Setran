@@ -1,23 +1,39 @@
 /* ============================================================
-   dashboard.js — ภาพรวมทั้งปี แยกรายเดือนและแยก BU (คลัง)
+   dashboard.js — ภาพรวมทั้งปี แยกรายเดือน (หรือราย Period 15–15) และแยก BU (คลัง)
    นับตามวันที่รับเมล (m.t0) ของแต่ละเคส เหมือนหน้าอื่นในระบบ
    ============================================================ */
 const MONTH_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-let DASH = {year: NOW().getFullYear()};
+let DASH = {year: NOW().getFullYear(), mode:'month'};
 
-function yearMonths(year){
-  const months = Array.from({length:12}, (_, i) => ({m:i, n:0, amt:0, pending:0, pendingAmt:0, closed:0, closedAmt:0}));
+/* ---------- ช่องเวลา 12 ช่องของปี — โหมดเดือนปฏิทิน หรือโหมด Period 15–15 ----------
+   ทั้งสองโหมดใช้รูปร่างข้อมูลเดียวกัน (label/title/start/end) เพื่อให้ fillBuckets()
+   และส่วนวาดกราฟด้านล่างใช้ร่วมกันได้โดยไม่ต้องแยกเงื่อนไข */
+function monthBuckets(year){
+  return Array.from({length:12}, (_, i) => ({
+    label: MONTH_TH[i], title: `${MONTH_TH[i]} ${year+543}`,
+    start: new Date(year, i, 1), end: new Date(year, i+1, 1)}));
+}
+function periodBuckets(year){
+  /* periodLabel()/periodOf() มาจาก reconcile.js — ใช้กติกา 15–15 เดียวกัน */
+  return Array.from({length:12}, (_, i) => {
+    const start = new Date(year, i, 15), end = new Date(year, i+1, 15);
+    return {label:`${pad(start.getDate())}/${pad(start.getMonth()+1)}`,
+            title: periodLabel({start, end}), start, end};
+  });
+}
+function fillBuckets(buckets){
+  for(const b of buckets) Object.assign(b, {n:0, amt:0, pending:0, pendingAmt:0, closed:0, closedAmt:0});
   for(const {c, m} of CACHE){
     if(!m.t0) continue;
     const d = D(m.t0);
-    if(d.getFullYear() !== year) continue;
-    const mo = months[d.getMonth()];
+    const b = buckets.find(x => d >= x.start && d < x.end);
+    if(!b) continue;
     const a = c.amount || 0;
-    mo.n++; mo.amt += a;
-    if(m.status === 'OPEN'){ mo.pending++; mo.pendingAmt += a; }
-    else if(m.status === 'CLOSED'){ mo.closed++; mo.closedAmt += a; }
+    b.n++; b.amt += a;
+    if(m.status === 'OPEN'){ b.pending++; b.pendingAmt += a; }
+    else if(m.status === 'CLOSED'){ b.closed++; b.closedAmt += a; }
   }
-  return months;
+  return buckets;
 }
 function yearByBU(year){
   const g = new Map();
@@ -35,17 +51,19 @@ function yearByBU(year){
 }
 
 function renderDashboard(){
-  const months = yearMonths(DASH.year);
+  const periodMode = DASH.mode === 'period';
+  const buckets = fillBuckets(periodMode ? periodBuckets(DASH.year) : monthBuckets(DASH.year));
   const bus = yearByBU(DASH.year);
-  const total = months.reduce((s, mo) => s + mo.n, 0);
-  const totalAmt = months.reduce((s, mo) => s + mo.amt, 0);
-  const pending = months.reduce((s, mo) => s + mo.pending, 0);
-  const pendingAmt = months.reduce((s, mo) => s + mo.pendingAmt, 0);
-  const closed = months.reduce((s, mo) => s + mo.closed, 0);
-  const closedAmt = months.reduce((s, mo) => s + mo.closedAmt, 0);
+  const total = buckets.reduce((s, b) => s + b.n, 0);
+  const totalAmt = buckets.reduce((s, b) => s + b.amt, 0);
+  const pending = buckets.reduce((s, b) => s + b.pending, 0);
+  const pendingAmt = buckets.reduce((s, b) => s + b.pendingAmt, 0);
+  const closed = buckets.reduce((s, b) => s + b.closed, 0);
+  const closedAmt = buckets.reduce((s, b) => s + b.closedAmt, 0);
   const pendingPct = total ? Math.round(pending / total * 100) : null;
   const CH = 200;   // ความสูงกราฟ (px)
-  const maxN = Math.max(1, ...months.map(mo => mo.n));
+  const maxN = Math.max(1, ...buckets.map(b => b.n));
+  const colLabel = periodMode ? 'Period' : 'เดือน';
 
   document.getElementById('dashboard').innerHTML = `
     <div class="panel">
@@ -66,40 +84,45 @@ function renderDashboard(){
     </div>
 
     <div class="panel">
-      <div class="phead"><h3>แยกรายเดือน — Pending เทียบกับปิดแล้ว</h3>
-        <span class="sp"><button type="button" class="sm" id="dashExportMonth">ส่งออก CSV รายเดือน</button></span></div>
+      <div class="phead"><h3>แยกราย${periodMode ? ' Period (15–15)' : 'เดือน'} — Pending เทียบกับปิดแล้ว</h3>
+        <span class="sp">
+          <div class="seg" id="dashModeSeg">
+            <button data-mode="month" aria-pressed="${!periodMode}">เดือนปฏิทิน</button>
+            <button data-mode="period" aria-pressed="${periodMode}">Period (15–15)</button>
+          </div>
+          <button type="button" class="sm" id="dashExportMonth">ส่งออก CSV</button></span></div>
       <div class="pbody">
         <div class="ylegend">
           <span class="lg"><i class="sw" style="background:var(--bad)"></i>Pending (ค้าง)</span>
           <span class="lg"><i class="sw" style="background:var(--ok)"></i>ปิดแล้ว</span>
         </div>
         <div class="ychart">
-          ${months.map(mo => {
-            const closedPx = mo.n ? Math.round(mo.closed / maxN * CH) : 0;
-            const pendingPx = mo.n ? Math.round(mo.pending / maxN * CH) : 0;
-            const gap = mo.closed && mo.pending ? 2 : 0;
-            const closedTop = mo.pending === 0;
+          ${buckets.map(b => {
+            const closedPx = b.n ? Math.round(b.closed / maxN * CH) : 0;
+            const pendingPx = b.n ? Math.round(b.pending / maxN * CH) : 0;
+            const gap = b.closed && b.pending ? 2 : 0;
+            const closedTop = b.pending === 0;
             return `<div class="ycol">
-              <div class="ytotal">${mo.n || ''}</div>
-              <div class="ybar" style="height:${CH}px" title="${MONTH_TH[mo.m]} ${DASH.year+543} — Pending ${mo.pending} เคส (${baht0(mo.pendingAmt)} บาท) · ปิดแล้ว ${mo.closed} เคส (${baht0(mo.closedAmt)} บาท)">
-                ${mo.pending ? `<div class="yseg pending" style="position:absolute;left:0;right:0;bottom:${closedPx+gap}px;height:${pendingPx}px;border-radius:4px 4px 0 0"></div>` : ''}
-                ${mo.closed ? `<div class="yseg closed" style="position:absolute;left:0;right:0;bottom:0;height:${closedPx}px;border-radius:${closedTop?'4px 4px':'0 0'} 0 0"></div>` : ''}
+              <div class="ytotal">${b.n || ''}</div>
+              <div class="ybar" style="height:${CH}px" title="${esc(b.title)} — Pending ${b.pending} เคส (${baht0(b.pendingAmt)} บาท) · ปิดแล้ว ${b.closed} เคส (${baht0(b.closedAmt)} บาท)">
+                ${b.pending ? `<div class="yseg pending" style="position:absolute;left:0;right:0;bottom:${closedPx+gap}px;height:${pendingPx}px;border-radius:4px 4px 0 0"></div>` : ''}
+                ${b.closed ? `<div class="yseg closed" style="position:absolute;left:0;right:0;bottom:0;height:${closedPx}px;border-radius:${closedTop?'4px 4px':'0 0'} 0 0"></div>` : ''}
               </div>
-              <div class="ymonth">${MONTH_TH[mo.m]}</div>
+              <div class="ymonth">${esc(b.label)}</div>
             </div>`;
           }).join('')}
         </div>
       </div>
       <div class="tw" style="border:0;border-top:1px solid var(--rule)"><table style="min-width:760px"><thead><tr>
-        <th>เดือน</th><th style="text-align:right">รับเข้า</th><th style="text-align:right">ยอดรวม</th>
+        <th>${colLabel}</th><th style="text-align:right">รับเข้า</th><th style="text-align:right">ยอดรวม</th>
         <th style="text-align:right">Pending</th><th style="text-align:right">ยอด Pending</th>
         <th style="text-align:right">ปิดแล้ว</th><th style="text-align:right">ยอดปิดแล้ว</th>
       </tr></thead><tbody>
-      ${months.map(mo => `<tr style="cursor:default">
-        <td>${MONTH_TH[mo.m]} ${DASH.year+543}</td>
-        <td class="r">${mo.n}</td><td class="r">${baht0(mo.amt)}</td>
-        <td class="r" style="${mo.pending?'color:var(--bad)':''}">${mo.pending||'—'}</td><td class="r">${mo.pendingAmt?baht0(mo.pendingAmt):'—'}</td>
-        <td class="r" style="color:var(--ok)">${mo.closed||'—'}</td><td class="r">${mo.closedAmt?baht0(mo.closedAmt):'—'}</td>
+      ${buckets.map(b => `<tr style="cursor:default">
+        <td>${esc(b.title)}</td>
+        <td class="r">${b.n}</td><td class="r">${baht0(b.amt)}</td>
+        <td class="r" style="${b.pending?'color:var(--bad)':''}">${b.pending||'—'}</td><td class="r">${b.pendingAmt?baht0(b.pendingAmt):'—'}</td>
+        <td class="r" style="color:var(--ok)">${b.closed||'—'}</td><td class="r">${b.closedAmt?baht0(b.closedAmt):'—'}</td>
       </tr>`).join('')}
       </tbody></table></div>
     </div>
@@ -125,11 +148,11 @@ function renderDashboard(){
   document.getElementById('dashPrev').onclick = () => { DASH.year--; render(); };
   document.getElementById('dashNext').onclick = () => { DASH.year++; render(); };
   document.getElementById('dashNow').onclick  = () => { DASH.year = NOW().getFullYear(); render(); };
+  document.querySelectorAll('#dashModeSeg button').forEach(b => b.onclick = () => { DASH.mode = b.dataset.mode; render(); });
   document.getElementById('dashExportMonth').onclick = () => {
-    const rows = [['เดือน','รับเข้า','ยอดรวม (บาท)','Pending','ยอด Pending (บาท)','ปิดแล้ว','ยอดปิดแล้ว (บาท)']];
-    for(const mo of months) rows.push([`${MONTH_TH[mo.m]} ${DASH.year+543}`, mo.n, mo.amt.toFixed(2),
-      mo.pending, mo.pendingAmt.toFixed(2), mo.closed, mo.closedAmt.toFixed(2)]);
-    download(`claim-dashboard-month-${DASH.year}-${stamp()}.csv`, csv(rows));
+    const rows = [[colLabel,'รับเข้า','ยอดรวม (บาท)','Pending','ยอด Pending (บาท)','ปิดแล้ว','ยอดปิดแล้ว (บาท)']];
+    for(const b of buckets) rows.push([b.title, b.n, b.amt.toFixed(2), b.pending, b.pendingAmt.toFixed(2), b.closed, b.closedAmt.toFixed(2)]);
+    download(`claim-dashboard-${periodMode?'period':'month'}-${DASH.year}-${stamp()}.csv`, csv(rows));
   };
   document.getElementById('dashExportBU').onclick = () => {
     const rows = [['คลัง (BU)','เคสทั้งปี','ยอดรวม (บาท)','Pending','ยอด Pending (บาท)','% Pending','ปิดแล้ว','ยอดปิดแล้ว (บาท)']];
