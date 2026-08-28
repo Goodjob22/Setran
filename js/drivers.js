@@ -17,7 +17,7 @@ const TITLES = /^(นาย|นางสาว|นาง|น\.ส\.|ด\.ช\.|�
 /* ชื่อเดียวกันที่พิมพ์ต่างกันเล็กน้อย ให้ได้กุญแจเดียวกัน */
 function dkey(s){
   let x = String(s || '').normalize('NFC').trim().toLowerCase();
-  x = x.replace(/[​ ]/g, '');
+  x = x.replace(/[​ ]/g, '');
   x = x.replace(TITLES, '');
   return x.replace(/[\s.\-_]/g, '');
 }
