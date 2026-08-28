@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="th" >
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operations Transport · เคลียร์เคลม 48 ชม.</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⏱️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="authWrap" hidden></div>
+
+<div id="shell" hidden>
+
+<div class="top">
+  <div class="wrap topin">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>Operations Transport เคลียร์เคลม 48 ชั่วโมง</h1><span class="v" id="orgTag">DHL · CJ</span></div>
+    <span class="clockNow" id="clockNow"></span>
+    <span class="conn" id="conn"><i></i><span id="connText">กำลังเชื่อมต่อ…</span></span>
+    <div class="who"><button class="sm gh" id="whoBtn"><span id="whoName">—</span></button>
+      <div class="whomenu" id="whoMenu" hidden>
+        <button type="button" id="miPw">เปลี่ยนรหัสผ่าน</button>
+        <button type="button" id="miOut">ออกจากระบบ</button>
+      </div></div>
+    <button class="sm" id="btnExportCase">ส่งออกตารางเคส</button>
+    <button class="sm" id="btnExportLog">ส่งออก Log</button>
+    <button class="sm pri" id="btnMailAll">ร่างเมลทวงงาน</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="appbar">
+    <div class="navseg" id="viewSeg">
+      <button data-view="board" aria-pressed="true">กระดานเคส</button>
+      <button data-view="queue" aria-pressed="false">คิวต้องส่งวันนี้</button>
+      <button data-view="entry" aria-pressed="false">คีย์งานเข้า</button>
+      <button data-view="reconcile" aria-pressed="false">นำเข้าสรุปรายคาบ</button>
+      <button data-view="fleet" aria-pressed="false">ทะเบียนรถ</button>
+      <button data-view="vendors" aria-pressed="false">ทะเบียนซับ</button>
+      <button data-view="memo" aria-pressed="false">สรุป / Memo</button>
+      <button data-view="settings" aria-pressed="false">ตั้งค่า</button>
+    </div>
+  </div>
+
+  <div id="app"><div class="loading">กำลังโหลดข้อมูลจากเซิร์ฟเวอร์…</div></div>
+
+  <div id="main" hidden>
+    <div id="alert"></div>
+
+    <div class="vsec" id="vsec">
+      <div class="slabel">รายซับ — กดเพื่อกรองเฉพาะรายนั้น</div>
+      <div class="vstrip" id="vstrip"></div>
+    </div>
+
+    <div class="bar" id="filterBar">
+      <div class="seg" id="statusSeg">
+        <button data-st="all" aria-pressed="true">ทั้งหมด</button>
+        <button data-st="open" aria-pressed="false">ยังไม่ปิด</button>
+        <button data-st="breach" aria-pressed="false">เกิน 48 ชม.</button>
+        <button data-st="closed" aria-pressed="false">ปิดแล้ว</button>
+        <button data-st="flag" aria-pressed="false">ข้อมูลน่าสงสัย</button>
+      </div>
+      <div class="seg" id="carrierSeg">
+        <button data-cr="all" aria-pressed="true">ทุกขนส่ง</button>
+        <button data-cr="DHL" aria-pressed="false">DHL</button>
+        <button data-cr="CJ" aria-pressed="false">CJ</button>
+      </div>
+      <div class="seg" id="buSeg"></div>
+      <input type="search" id="q" placeholder="ค้นเลขเคลม / ทะเบียน / พขร. / สาขา" aria-label="ค้นหา">
+      <span class="count" id="count"></span>
+    </div>
+
+    <div id="memoBar" class="alert" hidden>
+      <strong id="memoBarText"></strong>
+      <span class="sp"><button type="button" id="memoBarGo">ใส่เลข Memo</button>
+      <button type="button" id="memoBarClear">ยกเลิกที่เลือก</button></span>
+    </div>
+
+    <div id="board" class="tw">
+      <table>
+        <thead><tr>
+          <th style="width:30px"></th>
+          <th>เลขเคลม</th><th>ซับปัจจุบัน</th><th>สาขา · ทะเบียน</th>
+          <th style="text-align:right">ยอด (บาท)</th><th>รับเมล</th>
+          <th style="min-width:250px">นาฬิกา 48 ชม.</th><th>สถานะ</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="queue" hidden></div>
+    <div id="entry" hidden></div>
+    <div id="reconcile" hidden></div>
+    <div id="fleet" hidden></div>
+    <div id="vendors" hidden></div>
+    <div id="memo" hidden></div>
+    <div id="settings" hidden></div>
+
+    <footer id="foot"></footer>
+  </div>
+</div>
+
+</div>
+
+<dialog id="pdlg"><div>
+  <div class="dh"><div><h2 id="pTitle"></h2></div>
+    <button class="x sm" type="button" data-close>ปิด</button></div>
+  <div class="db" id="pBody"></div>
+</div></dialog>
+
+<dialog id="dlg"><div>
+  <div class="dh">
+    <div><h2 id="dTitle"></h2><div class="dsub" id="dSub"></div></div>
+    <button class="x sm" type="button" data-close>ปิด</button>
+  </div>
+  <div class="db" id="dBody"></div>
+</div></dialog>
+
+<dialog id="tdlg"><div>
+  <div class="dh">
+    <div><h2 id="tTitle"></h2><div class="dsub" id="tSub"></div></div>
+    <button class="x sm" type="button" data-close>ปิด</button>
+  </div>
+  <div class="db" id="tBody"></div>
+</div></dialog>
+
+<dialog id="mdlg"><div>
+  <div class="dh">
+    <div><h2 id="mTitle">ร่างเมลทวงงาน</h2><div class="dsub">กดเปิดใน Outlook ได้เลย หรือคัดลอกไปวางเอง</div></div>
+    <button class="x sm" type="button" data-close>ปิด</button>
+  </div>
+  <div class="db">
+    <div class="frow"><div class="fld" style="max-width:260px">
+      <label for="mVendor">เลือกซับ</label><select id="mVendor"></select>
+    </div></div>
+    <div class="frow">
+      <div class="fld"><label for="mEmail">ส่งถึง</label>
+        <input type="text" id="mEmail" autocomplete="off" spellcheck="false"
+          placeholder="เว้นว่างได้ แล้วค่อยพิมพ์ใน Outlook">
+        <span class="inline-hint" id="mEmailHint"></span></div>
+      <div class="fld" style="max-width:230px"><label for="mCc">สำเนาถึง (CC)</label>
+        <input type="text" id="mCc" autocomplete="off" spellcheck="false" placeholder="คั่นหลายคนด้วย ;"></div>
+    </div>
+    <div class="fld"><label for="mSubj">หัวข้อเมล</label><input type="text" id="mSubj"></div>
+    <div style="height:11px"></div>
+    <textarea class="mailbox" id="mBody" spellcheck="false"></textarea>
+    <div class="actions" style="margin-top:13px">
+      <button type="button" class="pri" id="mOutlook">เปิดใน Outlook</button>
+      <button type="button" id="mOwa">เปิด Outlook บนเว็บ</button>
+      <button type="button" id="mCopy">คัดลอกทั้งฉบับ</button>
+      <button type="button" id="mMark">บันทึกว่าส่งแล้ววันนี้</button>
+      <span class="hint" style="margin:0" id="mNote"></span>
+    </div>
+    <p class="hint" style="margin:10px 0 0">ระบบเปิดหน้าเขียนเมลที่กรอกไว้ให้พร้อมแล้ว
+      แต่<b>ไม่กดส่งแทน</b> — ให้ตรวจอีกรอบแล้วกดส่งเอง กันส่งผิดซับ
+      · กดส่งแล้วอย่าลืมกด “บันทึกว่าส่งแล้ววันนี้”</p>
+  </div>
+</div></dialog>
+
+<script src="js/supabase.js"></script>
+<script src="config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/store-supabase.js"></script>
+<script src="js/auth-supabase.js"></script>
+<script src="js/logic.js"></script>
+<script src="js/drivers.js"></script>
+<script src="js/board.js"></script>
+<script src="js/vendors.js"></script>
+<script src="js/fleet.js"></script>
+<script src="js/entry.js"></script>
+<script src="js/evidence.js"></script>
+<script src="js/reconcile.js"></script>
+<script src="js/memo.js"></script>
+<script src="js/settings-cloud.js"></script>
+<script src="js/main-cloud.js"></script>
+</body>
+</html>
