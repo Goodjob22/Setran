@@ -27,8 +27,10 @@ function shiftPeriod(key, delta){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 }
 function periodLabel(p){
+  /* โชว์วันเริ่มถึงวันสิ้นสุดตรงตัว (15/xx – 15/xx) ตามที่ตกลงกัน
+     ไม่หักออกหนึ่งวันแม้ช่วงจะนับแบบไม่รวมวันสิ้นสุดก็ตาม */
   const th = d => `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()+543}`;
-  return `${th(p.start)} – ${th(new Date(p.end.getTime() - 864e5))}`;
+  return `${th(p.start)} – ${th(p.end)}`;
 }
 
 /* ---------- อ่านวันที่แบบยืดหยุ่น — ไฟล์จากขนส่งเขียนวันที่ไม่เหมือนกันเสมอไป ---------- */

@@ -68,12 +68,14 @@ function gauge(m){
             : m.remain >= 0 ? `เหลือ ${hrs(m.remain)}` : `เกิน ${hrs(-m.remain)}`;
   return `<span class="gauge"><i style="width:${pct}%;background:${col}"></i></span><span class="mono" style="font-size:12px">${lbl}</span>`;
 }
+/* สถานะสามสี ตามที่ตกลงกัน: เกิน 48 ชม. (ยังไม่ปิด) = แดง · ยอมรับเคลม (ปิดแล้ว) = เขียว
+   · ออกเลข Memo แล้ว = เขียวเข้ม — เคสที่ปิดช้าก็ยังถือเป็น "ยอมรับเคลม" สีเขียวเหมือนกัน
+   ตัวเลขทันกำหนด/เกินกำหนดยังคำนวณและนับในหน้าสรุปตามปกติ แค่ไม่แยกสีที่ชิปนี้แล้ว */
 function statusChip(m){
   if(m.status === 'NO_DATA') return '<span class="chip n">ไม่มีข้อมูล</span>';
   if(m.status === 'CLOSED'){
-    if(m.memoNo) return '<span class="chip okdark">ปิด · Memo แล้ว</span>';
-    return m.sla === 'ON_TIME'
-      ? '<span class="chip ok">ปิด · ทันกำหนด</span>' : '<span class="chip bad">ปิด · เกินกำหนด</span>';
+    if(m.memoNo) return '<span class="chip okdark">ออก Memo แล้ว</span>';
+    return '<span class="chip ok">ยอมรับเคลม</span>';
   }
   if(m.needsAction) return '<span class="chip bad">ปฏิเสธถาวร · ต้องทำต่อ</span>';
   return m.sla === 'BREACH'  ? '<span class="chip bad">เกิน 48 ชม.</span>'
@@ -130,7 +132,7 @@ function openMemoAssign(){
   document.getElementById('pBody').innerHTML = `
     <form id="memoForm" novalidate>
       <div class="fld"><label for="memoNo">เลขที่ Memo</label>
-        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น MM-2569-08-014"></div>
+        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น ANL-ACC-OTH-69-02870"></div>
       <div class="actions" style="margin-top:14px"><button type="submit" class="pri">บันทึก</button></div>
     </form>`;
   document.getElementById('pdlg').showModal();
@@ -154,7 +156,7 @@ function openMemoSingle(id){
   document.getElementById('pBody').innerHTML = `
     <form id="memoForm" novalidate>
       <div class="fld"><label for="memoNo">เลขที่ Memo</label>
-        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น MM-2569-08-014"></div>
+        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น ANL-ACC-OTH-69-02870"></div>
       <div class="actions" style="margin-top:14px"><button type="submit" class="pri">บันทึก</button></div>
     </form>`;
   document.getElementById('pdlg').showModal();
@@ -306,7 +308,7 @@ function openCase(id){
             <input type="datetime-local" id="fAt" required value="${isoLocal(NOW())}">
             <span class="err">ต้องระบุวันเวลา</span></div>
           <div class="fld"><label for="fType">เกิดอะไรขึ้น</label>
-            <select id="fType">${Object.entries(TYPES).filter(([k])=>k!=='MEMO').map(([k,v])=>`<option value="${k}">${v.th}</option>`).join('')}</select></div>
+            <select id="fType">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v.th}</option>`).join('')}</select></div>
           <div class="fld"><label for="fVendor">ซับที่เกี่ยวข้อง</label>
             <select id="fVendor"><option value="">— ไม่ระบุ —</option>${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
         </div>
@@ -352,11 +354,22 @@ function openCase(id){
   dlg.querySelector('.db').scrollTop = 0;
   renderEvidence(c.id);
 
+  /* เลือก "ออกเลข Memo" ในลิสต์นี้ = ทางลัดเปิดป๊อปอัปใส่เลข Memo โดยตรง
+     ไม่ผ่านฟอร์มบันทึกทั่วไป เพราะต้องบังคับกรอกเลขที่ (และเหตุผลถ้าเป็นการแก้ไข) */
+  document.getElementById('fType').onchange = () => {
+    const sel = document.getElementById('fType');
+    if(sel.value !== 'MEMO') return;
+    sel.value = 'RECEIVE';
+    if(m.status !== 'CLOSED'){ toast('ต้องปิดเคส (ซับรับเคลม หรือ ปิดงานเอง) ก่อน ถึงจะใส่เลข Memo ได้'); return; }
+    m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
+  };
   document.getElementById('fAdd').onsubmit = async ev => {
     ev.preventDefault();
+    const type = document.getElementById('fType').value;
+    if(type === 'MEMO') return;
     const at = document.getElementById('fAt').value;
     if(!at){ document.getElementById('fAt').reportValidity(); return; }
-    await addEvent(c.id, {at, type:document.getElementById('fType').value,
+    await addEvent(c.id, {at, type,
       vendor:document.getElementById('fVendor').value || null,
       text:document.getElementById('fNote').value.trim()});
     toast('บันทึกแล้ว');
