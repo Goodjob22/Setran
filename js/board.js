@@ -26,8 +26,12 @@ function renderAlert(){
 
 /* ---------- การ์ดรายซับ ---------- */
 function renderVendorStrip(){
+  /* ตัวเลขในการ์ดต้องตรงกับตัวกรอง ขนส่ง / BU / สถานะ / คำค้น ที่เลือกอยู่บนแถบด้านบน
+     จึงคำนวณจาก scopedCache() แทนที่จะเป็น CACHE ทั้งก้อน — ไม่กรองด้วยซับ (F.vendor)
+     เพราะการ์ดต้องขึ้นครบทุกซับให้กดเลือกได้เสมอ */
+  const list = scopedCache();
   const m = new Map();
-  for(const {m:x} of CACHE){
+  for(const {m:x} of list){
     const v = vendorOf(x);
     const s = m.get(v) || {v, open:0, breach:0, closed:0, sum:0, n:0};
     if(x.status === 'OPEN'){ s.open++; if(x.sla === 'BREACH') s.breach++; }
@@ -35,9 +39,9 @@ function renderVendorStrip(){
     m.set(v, s);
   }
   const st = [...m.values()].sort((a,b) => (b.open+b.closed) - (a.open+a.closed));
-  const total = CACHE.length;
-  const tOpen = CACHE.filter(x => x.m.status === 'OPEN').length;
-  const tBr   = CACHE.filter(x => x.m.status === 'OPEN' && x.m.sla === 'BREACH').length;
+  const total = list.length;
+  const tOpen = list.filter(x => x.m.status === 'OPEN').length;
+  const tBr   = list.filter(x => x.m.status === 'OPEN' && x.m.sla === 'BREACH').length;
   const card = (key, name, all, open, br, avg) => {
     const okw = all ? Math.max(0, (all-open)/all*100) : 0;
     const brw = all ? br/all*100 : 0;

@@ -113,12 +113,13 @@ const NOVENDOR   = '(ยังไม่ระบุซับ)';
 const vendorOf   = m => m.vendor || NOVENDOR;
 const vendorPass = m => F.vendor === 'all' || vendorOf(m) === F.vendor;
 
-function visible(){
+/* ตัวกรองที่ไม่เจาะจงซับ (ขนส่ง / BU / สถานะ / คำค้น) — ใช้ร่วมกันทั้งตารางเคส
+   และการ์ดรายซับ เพื่อให้ตัวเลขสองที่นี้ตรงกันเสมอตามแถบ Slicer ด้านบน */
+function scopedCache(){
   const q = F.q.trim().toLowerCase();
   return CACHE.filter(({c, m, bu}) => {
     if(F.carrier !== 'all' && c.carrier !== F.carrier) return false;
     if(F.bu !== 'all' && bu !== F.bu) return false;
-    if(!vendorPass(m)) return false;
     if(F.status === 'open'   && m.status !== 'OPEN') return false;
     if(F.status === 'closed' && m.status !== 'CLOSED') return false;
     if(F.status === 'breach' && !(m.status === 'OPEN' && m.sla === 'BREACH')) return false;
@@ -129,4 +130,8 @@ function visible(){
     }
     return true;
   });
+}
+
+function visible(){
+  return scopedCache().filter(({m}) => vendorPass(m));
 }
