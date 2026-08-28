@@ -1,5 +1,5 @@
 /* ============================================================
-   reconcile.js — นำเข้าไฟล์สรุปรายคาบ (15–15) มาเทียบกับที่คีย์รายวัน
+   reconcile.js — นำเข้าไฟล์สรุป Period (15–15) มาเทียบกับที่คีย์รายวัน
    ------------------------------------------------------------
    ทำไมต้องมี: เคสถูกคีย์เข้าระบบทุกวันอยู่แล้วที่หน้า "คีย์งานเข้า"
    แต่ขนส่งส่งไฟล์สรุปมาอีกทีเป็นรอบ ไฟล์นี้ใช้ไล่เทียบว่าตรงกันไหม
@@ -61,12 +61,12 @@ function renderReconcile(){
 
   document.getElementById('reconcile').innerHTML = `
     <div class="panel">
-      <div class="phead"><h3>สรุปยอด Pending รายคาบ (15–15)</h3>
+      <div class="phead"><h3>สรุปยอด Pending ราย Period (15–15)</h3>
         <span class="sp">
-          <button type="button" class="sm" id="rcPrev">‹ คาบก่อนหน้า</button>
+          <button type="button" class="sm" id="rcPrev">‹ Period ก่อนหน้า</button>
           <span class="mono" style="font-size:12.5px">${periodLabel(R.p)}</span>
-          <button type="button" class="sm" id="rcNext">คาบถัดไป ›</button>
-          <button type="button" class="sm" id="rcNow">คาบปัจจุบัน</button></span></div>
+          <button type="button" class="sm" id="rcNext">Period ถัดไป ›</button>
+          <button type="button" class="sm" id="rcNow">Period ปัจจุบัน</button></span></div>
       <div class="pbody" style="padding:0"><div class="totrow" style="margin:0;border:0">
         <div class="tot"><div class="tk">เคสในรอบนี้</div><div class="tv">${R.list.length}</div>
           <div class="tn">${baht0(R.totalAmt)} บาท</div></div>
@@ -80,14 +80,14 @@ function renderReconcile(){
       </div></div>
       <div class="pbody">
         <div class="actions" style="margin:0">
-          <button type="button" id="rcExport">ส่งออก CSV รายคาบนี้</button>
+          <button type="button" id="rcExport">ส่งออก CSV Period นี้</button>
           <button type="button" class="pri" id="rcReport">คัดลอกรายงานประจำสัปดาห์</button>
         </div>
       </div>
     </div>
 
     <div class="panel">
-      <div class="phead"><h3>นำเข้าไฟล์สรุปรายคาบ</h3>
+      <div class="phead"><h3>นำเข้าไฟล์สรุป Period</h3>
         <span class="sp"><button type="button" class="sm" id="rcTemplate">โหลดไฟล์ตัวอย่าง</button></span></div>
       <div class="pbody">
         <p class="hint">วางตารางจาก Excel (Ctrl+V) หรือเลือกไฟล์ CSV — ต้องมี 9 คอลัมน์เรียงตามนี้:
@@ -111,7 +111,7 @@ function renderReconcile(){
   document.getElementById('rcNow').onclick  = () => { RC.periodKey = periodOf(NOW()).key; render(); };
   document.getElementById('rcExport').onclick = () => exportPeriodCsv(R);
   document.getElementById('rcReport').onclick = () => copyPeriodReport(R);
-  document.getElementById('rcTemplate').onclick = () => download('template-นำเข้าสรุปรายคาบ.csv',
+  document.getElementById('rcTemplate').onclick = () => download('template-นำเข้าสรุป-period.csv',
     csv([['เลขเคลม','ขนส่ง','วันที่รับเมล','สาขา','ทะเบียนรถ','พขร.','สาเหตุ','ยอด','หมายเหตุ'],
          ['MKM-2569-08-00531','DHL','2026-08-05','101','71-4708','จีรวัฒน์','สินค้าส่งขาด','1250.00','']]));
   document.getElementById('rcPick').onclick = () => document.getElementById('rcFile').click();
@@ -197,7 +197,7 @@ async function applyReconcileImport(){
     const rec = {id:r.id, carrier:r.carrier, store:r.store, store_name:'', dept:'',
       driver:r.driver, truck:r.truck, reason:r.reason, ref_date:at.slice(0,10),
       amount:Math.round(r.amt*100)/100, items:[],
-      events:[{type:'RECEIVE', at, vendor:null, text:r.note || 'นำเข้าจากไฟล์สรุปรายคาบ', src:'reconcile'}],
+      events:[{type:'RECEIVE', at, vendor:null, text:r.note || 'นำเข้าจากไฟล์สรุป Period', src:'reconcile'}],
       source:'reconcile'};
     try{
       const j = await API.addCase(rec);
@@ -212,7 +212,7 @@ async function applyReconcileImport(){
   toast(`นำเข้าแล้ว ${added} เคส${failed ? ` · ${failed} รายการนำเข้าไม่สำเร็จ` : ''}`);
 }
 
-/* ---------- ส่งออก / คัดลอกรายงาน Pending รายคาบ ---------- */
+/* ---------- ส่งออก / คัดลอกรายงาน Pending ราย Period ---------- */
 function exportPeriodCsv(R){
   const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ทะเบียน','ยอด (บาท)','รับเมล','สถานะ']];
   for(const {c, m, bu} of R.list) rows.push([c.id, c.carrier, bu, c.store_name || c.store, c.truck,

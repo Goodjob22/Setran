@@ -215,6 +215,7 @@ input[type=date]{font-family:inherit; font-size:14px; padding:6px 9px; backgroun
 .tot .tn{font-size:11.5px; color:var(--muted); line-height:1.45}
 .tot .tv.ok{color:var(--ok)} .tot .tv.bad{color:var(--bad)}
 .tot .tv.okdark{color:var(--ok); font-weight:800}
+.tot .tv.warn{color:var(--warn)}
 .vlink{color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent-line); cursor:pointer}
 .hist{border-left:2px solid var(--rule); margin-left:6px; padding-left:18px}
 .hrow{padding:8px 0; border-bottom:1px solid var(--rule-soft); display:flex; gap:10px;

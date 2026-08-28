@@ -62,6 +62,10 @@ function rangeLabel(){
 
 function renderMemo(){
   const list = memoSet(), T = agg(list), V = byVendor(list);
+  /* เคสที่ปิดแล้วแต่ยังไม่ได้ออกเลข Memo — "รอเปิด Memo" */
+  const pendingMemo = T.closed - T.memoed, pendingMemoAmt = T.closedAmt - T.memoedAmt;
+  const memoedPct = T.closed ? Math.round(T.memoed / T.closed * 100) : null;
+  const pendingMemoPct = T.closed ? 100 - memoedPct : null;
   const scopeName = {all:'ทุกสถานะ', open:'เฉพาะเคสค้าง', closed:'เฉพาะเคสสำเร็จ'}[M.scope];
   const now = NOW(), H24 = 864e5;
   const openAll = CACHE.filter(x => x.m.status === 'OPEN');
@@ -111,9 +115,11 @@ function renderMemo(){
 
     <div class="totrow">
       <div class="tot"><div class="tk">เคสทั้งหมด</div><div class="tv">${T.n}</div><div class="tn">${baht0(T.amt)} บาท</div></div>
-      <div class="tot"><div class="tk">เคสสำเร็จ</div><div class="tv ok">${T.closed}</div><div class="tn">${baht0(T.closedAmt)} บาท</div></div>
-      <div class="tot"><div class="tk">ออก Memo แล้ว (Performance)</div><div class="tv okdark">${T.memoed}</div>
-        <div class="tn">${baht0(T.memoedAmt)} บาท · จากเคสสำเร็จ ${T.closed} เคส</div></div>
+      <div class="tot"><div class="tk">ปิดเคสแล้ว</div><div class="tv ok">${T.closed}</div><div class="tn">${baht0(T.closedAmt)} บาท</div></div>
+      <div class="tot"><div class="tk">รอเปิด Memo</div><div class="tv ${pendingMemo?'warn':''}">${pendingMemo}</div>
+        <div class="tn">${baht0(pendingMemoAmt)} บาท${pendingMemoPct!=null?` · ${pendingMemoPct}% ของเคสที่ปิดแล้ว`:''}</div></div>
+      <div class="tot"><div class="tk">เปิด Memo แล้ว (Performance)</div><div class="tv okdark">${T.memoed}</div>
+        <div class="tn">${baht0(T.memoedAmt)} บาท${memoedPct!=null?` · ${memoedPct}% ของเคสที่ปิดแล้ว`:''}</div></div>
       <div class="tot"><div class="tk">เคสค้าง</div><div class="tv bad">${T.open}</div><div class="tn">${baht0(T.openAmt)} บาท</div></div>
       <div class="tot"><div class="tk">ทันกำหนด</div><div class="tv">${T.pct!=null?T.pct+'%':'—'}</div>
         <div class="tn">ทัน ${T.onTime} · เกิน ${T.overdue}</div></div>
