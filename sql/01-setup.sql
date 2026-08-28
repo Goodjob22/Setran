@@ -124,7 +124,7 @@ alter table public.cases  add column if not exists t0why text default '';
 
 alter table public.events drop constraint if exists events_type_check;
 alter table public.events add  constraint events_type_check check (type in
-  ('RECEIVE','FORWARD','FOLLOWUP','ACCEPT','REJECT','REJECT_FINAL','ESCALATE','CLOSE','NOTE'));
+  ('RECEIVE','FORWARD','FOLLOWUP','ACCEPT','REJECT','REJECT_FINAL','ESCALATE','CLOSE','MEMO','NOTE'));
 
 -- ─── ส่วนที่ 2 : ดัชนี (ทำให้ค้นเร็ว) ──────────────────────
 create index if not exists cases_bu_idx      on public.cases(bu);

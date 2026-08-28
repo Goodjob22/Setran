@@ -24,7 +24,7 @@ function memoSet(){
 }
 function agg(list){
   const o = {n:list.length, amt:0, open:0, openAmt:0, closed:0, closedAmt:0, onTime:0, overdue:0,
-             breach:0, needAct:0, elSum:0, elN:0, legSum:0, intSum:0, els:[]};
+             breach:0, needAct:0, elSum:0, elN:0, legSum:0, intSum:0, els:[], memoed:0, memoedAmt:0};
   for(const {c,m} of list){
     const a = c.amount || 0;
     o.amt += a;
@@ -33,6 +33,7 @@ function agg(list){
       m.sla === 'ON_TIME' ? o.onTime++ : o.overdue++;
       o.elSum += m.el; o.elN++; o.els.push(m.el);
       o.legSum += m.legs.reduce((s,l) => s+l.h, 0); o.intSum += m.internal || 0;
+      if(m.memoNo){ o.memoed++; o.memoedAmt += a; }
     } else if(m.status === 'OPEN'){
       o.open++; o.openAmt += a;
       if(m.sla === 'BREACH') o.breach++;
@@ -111,6 +112,8 @@ function renderMemo(){
     <div class="totrow">
       <div class="tot"><div class="tk">เคสทั้งหมด</div><div class="tv">${T.n}</div><div class="tn">${baht0(T.amt)} บาท</div></div>
       <div class="tot"><div class="tk">เคสสำเร็จ</div><div class="tv ok">${T.closed}</div><div class="tn">${baht0(T.closedAmt)} บาท</div></div>
+      <div class="tot"><div class="tk">ออก Memo แล้ว (Performance)</div><div class="tv okdark">${T.memoed}</div>
+        <div class="tn">${baht0(T.memoedAmt)} บาท · จากเคสสำเร็จ ${T.closed} เคส</div></div>
       <div class="tot"><div class="tk">เคสค้าง</div><div class="tv bad">${T.open}</div><div class="tn">${baht0(T.openAmt)} บาท</div></div>
       <div class="tot"><div class="tk">ทันกำหนด</div><div class="tv">${T.pct!=null?T.pct+'%':'—'}</div>
         <div class="tn">ทัน ${T.onTime} · เกิน ${T.overdue}</div></div>

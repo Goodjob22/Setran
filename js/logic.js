@@ -13,6 +13,7 @@ const TYPES = {
   ACCEPT:       {th:'ซับรับเคลม',                  cls:'ok'},
   ESCALATE:     {th:'ส่งต่อ DHL Operation',        cls:'warn'},
   CLOSE:        {th:'ปิดงานเอง',                   cls:'ok'},
+  MEMO:         {th:'ออกเลข Memo',                 cls:'okdark'},
   NOTE:         {th:'บันทึกเพิ่มเติม',              cls:'n'},
 };
 const OPENS  = ['RECEIVE','FORWARD'];
@@ -82,8 +83,13 @@ function compute(c){
   const lastFollow = [...timed].reverse().find(e => e.type === 'FOLLOWUP' || e.type === 'FORWARD');
   const sentToday = lastFollow ? todayKey(D(lastFollow.at)) === todayKey() : false;
 
+  /* เลข Memo ปัจจุบัน — เอาจาก event MEMO ล่าสุด (ถ้าเคยแก้เลขผิด ประวัติเดิมยังอยู่ในไทม์ไลน์
+     event NOTE ที่บันทึกเหตุผลไว้ก่อนหน้า ไม่ได้ถูกลบ แค่ MEMO อันล่าสุดคือค่าที่ใช้จริง) */
+  const memoEvents = timed.filter(e => e.type === 'MEMO');
+  const memoNo = memoEvents.length ? memoEvents[memoEvents.length-1].text : null;
+
   return {ev, timed, t0, tEnd, closeBy, status, sla, el, legs, internal, needsAction,
-          vendor, flags, deadline, remain, sentToday, fixed: !!c.t0fix};
+          vendor, flags, deadline, remain, sentToday, fixed: !!c.t0fix, memoNo};
 }
 
 /* ---------- สถานะรวมของทุกเคส ---------- */

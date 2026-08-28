@@ -70,22 +70,44 @@ function gauge(m){
 }
 function statusChip(m){
   if(m.status === 'NO_DATA') return '<span class="chip n">ไม่มีข้อมูล</span>';
-  if(m.status === 'CLOSED')  return m.sla === 'ON_TIME'
+  if(m.status === 'CLOSED'){
+    if(m.memoNo) return '<span class="chip okdark">ปิด · Memo แล้ว</span>';
+    return m.sla === 'ON_TIME'
       ? '<span class="chip ok">ปิด · ทันกำหนด</span>' : '<span class="chip bad">ปิด · เกินกำหนด</span>';
+  }
   if(m.needsAction) return '<span class="chip bad">ปฏิเสธถาวร · ต้องทำต่อ</span>';
   return m.sla === 'BREACH'  ? '<span class="chip bad">เกิน 48 ชม.</span>'
        : m.sla === 'AT_RISK' ? '<span class="chip warn">ใกล้ครบกำหนด</span>'
        : '<span class="chip ok">อยู่ในกรอบ</span>';
 }
+
+/* เคสที่เลือกไว้เพื่อออกเลข Memo พร้อมกันหลายเคส — เลือกได้เฉพาะเคสที่ปิดแล้วและยังไม่มีเลข Memo
+   (เคสที่มีเลข Memo อยู่แล้วต้องแก้ทีละเคสจากหน้ารายละเอียด เพราะแต่ละเคสมีเลขเดิมต่างกัน) */
+let memoSelect = new Set();
+function renderMemoBar(){
+  const bar = document.getElementById('memoBar');
+  if(memoSelect.size){
+    bar.hidden = false;
+    document.getElementById('memoBarText').textContent = `เลือกไว้ ${memoSelect.size} เคสที่ปิดแล้ว`;
+  } else bar.hidden = true;
+}
+
 function renderTable(){
   const list = visible().sort((a,b) => {
     const rank = x => x.m.status === 'CLOSED' ? 2 : x.m.status === 'NO_DATA' ? 1 : 0;
     return rank(a) !== rank(b) ? rank(a) - rank(b) : (b.m.el||0) - (a.m.el||0);
   });
+  /* เคสที่หลุดจากรายการที่เห็น (เปลี่ยนตัวกรอง) ให้ถอดออกจากที่เลือกไว้ด้วย กันเลือกเคสที่มองไม่เห็นค้างอยู่ */
+  const shown = new Set(list.map(x => x.c.id));
+  for(const id of [...memoSelect]) if(!shown.has(id)) memoSelect.delete(id);
+  renderMemoBar();
+
   document.getElementById('count').textContent = `แสดง ${list.length} จาก ${CACHE.length} เคส`;
   const tb = document.getElementById('rows');
-  if(!list.length){ tb.innerHTML = '<tr><td colspan="7" class="empty">ไม่พบเคสตามเงื่อนไขที่เลือก</td></tr>'; return; }
+  if(!list.length){ tb.innerHTML = '<tr><td colspan="8" class="empty">ไม่พบเคสตามเงื่อนไขที่เลือก</td></tr>'; return; }
   tb.innerHTML = list.map(({c,m,bu}) => `<tr data-id="${esc(c.id)}">
+    <td onclick="event.stopPropagation()">${m.status === 'CLOSED' && !m.memoNo
+      ? `<input type="checkbox" class="memoPick" data-id="${esc(c.id)}" ${memoSelect.has(c.id)?'checked':''}>` : ''}</td>
     <td class="id">${esc(c.id)}<span class="sub">${c.carrier} · ${esc(bu)}</span></td>
     <td>${m.vendor ? esc(m.vendor) : '<span style="color:var(--faint)">—</span>'}${m.flags.length?'<span class="flagdot" title="ข้อมูลน่าสงสัย"></span>':''}</td>
     <td>${esc(c.store_name || c.store || '—')}<span class="sub">${esc(c.truck||'')} ${esc(c.driver||'')}</span></td>
@@ -94,6 +116,85 @@ function renderTable(){
     <td>${gauge(m)}</td>
     <td>${statusChip(m)}</td></tr>`).join('');
   tb.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openCase(tr.dataset.id));
+  tb.querySelectorAll('.memoPick').forEach(cb => cb.onchange = () => {
+    if(cb.checked) memoSelect.add(cb.dataset.id); else memoSelect.delete(cb.dataset.id);
+    renderMemoBar();
+  });
+}
+
+/* ---------- ใส่เลข Memo ---------- */
+/* เพิ่มครั้งแรก — ไม่ใช่การแก้ไข จึงไม่ต้องยืนยันซ้ำหรือใส่เหตุผล */
+function openMemoAssign(){
+  if(!memoSelect.size) return;
+  document.getElementById('pTitle').textContent = `ใส่เลข Memo ให้ ${memoSelect.size} เคสที่เลือก`;
+  document.getElementById('pBody').innerHTML = `
+    <form id="memoForm" novalidate>
+      <div class="fld"><label for="memoNo">เลขที่ Memo</label>
+        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น MM-2569-08-014"></div>
+      <div class="actions" style="margin-top:14px"><button type="submit" class="pri">บันทึก</button></div>
+    </form>`;
+  document.getElementById('pdlg').showModal();
+  document.getElementById('memoForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const no = document.getElementById('memoNo').value.trim();
+    if(!no) return;
+    const ids = [...memoSelect];
+    for(const id of ids)
+      await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    memoSelect.clear();
+    document.getElementById('pdlg').close();
+    render();
+    toast(`ใส่เลข Memo ${no} ให้ ${ids.length} เคสแล้ว`);
+  };
+}
+
+/* ใส่เลข Memo จากหน้ารายละเอียดเคสเดียว — เพิ่มครั้งแรกเหมือนกัน ไม่ต้องยืนยัน/เหตุผล */
+function openMemoSingle(id){
+  document.getElementById('pTitle').textContent = 'ใส่เลข Memo';
+  document.getElementById('pBody').innerHTML = `
+    <form id="memoForm" novalidate>
+      <div class="fld"><label for="memoNo">เลขที่ Memo</label>
+        <input type="text" id="memoNo" required autocomplete="off" placeholder="เช่น MM-2569-08-014"></div>
+      <div class="actions" style="margin-top:14px"><button type="submit" class="pri">บันทึก</button></div>
+    </form>`;
+  document.getElementById('pdlg').showModal();
+  document.getElementById('memoForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const no = document.getElementById('memoNo').value.trim();
+    if(!no) return;
+    await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    document.getElementById('pdlg').close();
+    toast(`ใส่เลข Memo ${no} แล้ว`);
+  };
+}
+
+/* แก้เลขที่ใส่ผิดแล้ว — เคสเดียวเท่านั้น ต้องยืนยันและใส่เหตุผลทุกครั้ง
+   เลขเดิมไม่ถูกลบ แค่บันทึกเหตุผลไว้ก่อน แล้วค่อยบันทึกเลขใหม่ต่อท้ายในไทม์ไลน์ */
+function openMemoFix(id, oldNo){
+  document.getElementById('pTitle').textContent = 'แก้เลข Memo';
+  document.getElementById('pBody').innerHTML = `
+    <p class="hint" style="margin-top:0">เลขเดิม: <b>${esc(oldNo)}</b> — เลขเดิมจะยังอยู่ในประวัติ ไม่หายไปไหน</p>
+    <form id="memoFixForm" novalidate>
+      <div class="fld"><label for="fixNo">เลขที่ Memo ใหม่ (ที่ถูกต้อง)</label>
+        <input type="text" id="fixNo" required autocomplete="off" value="${esc(oldNo)}"></div>
+      <div class="fld" style="margin-top:11px"><label for="fixWhy">เหตุผลที่แก้ (บังคับกรอก)</label>
+        <textarea id="fixWhy" required placeholder="เช่น พิมพ์เลขปีผิด ที่ถูกต้องคือ..."></textarea></div>
+      <div class="actions" style="margin-top:14px"><button type="submit" class="pri">บันทึกการแก้ไข</button></div>
+    </form>`;
+  document.getElementById('pdlg').showModal();
+  document.getElementById('memoFixForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const no = document.getElementById('fixNo').value.trim();
+    const why = document.getElementById('fixWhy').value.trim();
+    if(!no || !why) return;
+    if(no === oldNo){ toast('เลขใหม่เหมือนเลขเดิม ไม่มีอะไรต้องแก้'); return; }
+    if(!confirm(`ยืนยันแก้เลข Memo ของเคส ${id}\n\nจาก ${oldNo}\nเป็น ${no}\n\nเหตุผล: ${why}`)) return;
+    const at = isoLocal(NOW());
+    await addEvent(id, {at, type:'NOTE', vendor:null, text:`แก้เลข Memo จาก ${oldNo} เป็น ${no} — เหตุผล: ${why}`});
+    await addEvent(id, {at, type:'MEMO', vendor:null, text:no});
+    document.getElementById('pdlg').close();
+    toast('แก้เลข Memo แล้ว');
+  };
 }
 
 /* ---------- คิวต้องส่งวันนี้ ---------- */
@@ -205,7 +306,7 @@ function openCase(id){
             <input type="datetime-local" id="fAt" required value="${isoLocal(NOW())}">
             <span class="err">ต้องระบุวันเวลา</span></div>
           <div class="fld"><label for="fType">เกิดอะไรขึ้น</label>
-            <select id="fType">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v.th}</option>`).join('')}</select></div>
+            <select id="fType">${Object.entries(TYPES).filter(([k])=>k!=='MEMO').map(([k,v])=>`<option value="${k}">${v.th}</option>`).join('')}</select></div>
           <div class="fld"><label for="fVendor">ซับที่เกี่ยวข้อง</label>
             <select id="fVendor"><option value="">— ไม่ระบุ —</option>${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
         </div>
@@ -227,6 +328,14 @@ function openCase(id){
       <div class="actions"><button type="submit">บันทึกเวลาใหม่</button>
         ${m.fixed?'<button type="button" id="xUndo" class="gh">ย้อนกลับเป็นค่าจากไฟล์</button>':''}</div></form>
     </fieldset>
+
+    ${m.status === 'CLOSED' ? `<fieldset><legend>เลข Memo</legend>
+      <p class="hint">${m.memoNo ? `เลขที่ Memo: <b>${esc(m.memoNo)}</b> — เคสนี้นับเข้า Performance แล้ว`
+        : 'ยังไม่มีเลข Memo — เคสนี้ปิดแล้ว ใส่เลข Memo ได้เลย'}</p>
+      <div class="actions">
+        <button type="button" id="dMemo">${m.memoNo ? 'แก้เลข Memo' : 'ใส่เลข Memo'}</button>
+      </div>
+    </fieldset>` : ''}
 
     <fieldset><legend>หลักฐานประกอบเคส</legend>
       <p class="hint">แนบภาพเมล ใบนำออก ภาพ GPS หรือเอกสารยอดเงิน แล้วผูกกับเหตุการณ์ที่เกี่ยวข้องได้</p>
@@ -263,6 +372,8 @@ function openCase(id){
   const un = document.getElementById('xUndo');
   if(un) un.onclick = async () => { await API.patchCase(c.id, {t0fix:null, t0why:''}); c.t0fix = null; render(); openCase(c.id); };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
+  const dm = document.getElementById('dMemo');
+  if(dm) dm.onclick = () => m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
   const dd = document.getElementById('dDel');
   if(dd) dd.onclick = async () => {
     if(!confirm(`ลบเคส ${c.id} และบันทึกทั้งหมด?`)) return;
