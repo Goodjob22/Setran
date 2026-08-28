@@ -24,13 +24,13 @@ function render(){
   buSeg.querySelectorAll('button').forEach(b => b.onclick = () => { F.bu = b.dataset.bu; render(); });
 
   if(isCase) { renderAlert(); renderVendorStrip(); }
-  for(const v of ['board','queue','entry','fleet','vendors','memo','settings'])
+  for(const v of ['board','queue','entry','reconcile','fleet','vendors','memo','settings'])
     document.getElementById(v).hidden = F.view !== v;
-  ({board:renderTable, queue:renderQueue, entry:renderEntry, fleet:renderFleet,
+  ({board:renderTable, queue:renderQueue, entry:renderEntry, reconcile:renderReconcile, fleet:renderFleet,
     vendors:renderVendorsView, memo:renderMemo, settings:renderSettings})[F.view]();
 
   document.getElementById('orgTag').textContent = S.settings.orgName || 'DHL · CJ';
-  const mine = allCases().filter(c => c.source && c.source !== 'seed' && c.source !== 'import').length;
+  const mine = allCases().filter(c => c.source && c.source !== 'seed' && c.source !== 'import' && c.source !== 'reconcile').length;
   document.getElementById('foot').textContent =
     `${CACHE.length} เคส (คีย์เองในระบบ ${mine}) · ${Object.keys(S.trucks).length} ทะเบียนรถ · ` +
     `${Object.keys(S.vendors).length} ซับ · ${Object.keys(S.evidence).length} รูปหลักฐาน · ` +
