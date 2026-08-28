@@ -350,6 +350,8 @@ code.path{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(
 .ycol{flex:1; display:flex; flex-direction:column; align-items:center; min-width:0}
 .ybar{position:relative; width:100%; max-width:24px}
 .yseg{width:100%}
+.yseg.pending{background:var(--bad)}
+.yseg.closed{background:var(--ok)}
 .ycol .ymonth{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--faint); margin-top:8px}
 .ycol .ytotal{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-bottom:6px; font-variant-numeric:tabular-nums}
 
