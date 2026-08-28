@@ -215,6 +215,7 @@ input[type=date]{font-family:inherit; font-size:14px; padding:6px 9px; backgroun
 .tot .tn{font-size:11.5px; color:var(--muted); line-height:1.45}
 .tot .tv.ok{color:var(--ok)} .tot .tv.bad{color:var(--bad)}
 .tot .tv.okdark{color:var(--ok); font-weight:800}
+.tot .tv.warn{color:var(--warn)}
 .vlink{color:var(--accent); text-decoration:none; border-bottom:1px dotted var(--accent-line); cursor:pointer}
 .hist{border-left:2px solid var(--rule); margin-left:6px; padding-left:18px}
 .hrow{padding:8px 0; border-bottom:1px solid var(--rule-soft); display:flex; gap:10px;
@@ -340,6 +341,17 @@ code.path{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(
 .abtn:hover{filter:brightness(1.08)}
 .abtn:disabled{opacity:.6; cursor:default}
 .afoot{margin:20px 0 0; font-size:12.5px; color:var(--faint); line-height:1.6}
+
+/* ---------- dashboard: กราฟรายเดือนทั้งปี ---------- */
+.ylegend{display:flex; gap:18px; align-items:center; margin-bottom:16px; font-size:12.5px; color:var(--muted)}
+.ylegend .lg{display:inline-flex; align-items:center; gap:6px}
+.ylegend .sw{width:10px; height:10px; border-radius:2px; display:inline-block}
+.ychart{display:flex; align-items:flex-end; gap:10px; padding:0 4px 12px; border-bottom:1px solid var(--rule)}
+.ycol{flex:1; display:flex; flex-direction:column; align-items:center; min-width:0}
+.ybar{position:relative; width:100%; max-width:24px}
+.yseg{width:100%}
+.ycol .ymonth{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--faint); margin-top:8px}
+.ycol .ytotal{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted); margin-bottom:6px; font-variant-numeric:tabular-nums}
 
 /* ---------- เมนูผู้ใช้ ---------- */
 .who{position:relative}
