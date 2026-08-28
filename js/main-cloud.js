@@ -24,10 +24,10 @@ function render(){
   buSeg.querySelectorAll('button').forEach(b => b.onclick = () => { F.bu = b.dataset.bu; render(); });
 
   if(isCase) { renderAlert(); renderVendorStrip(); }
-  for(const v of ['board','queue','entry','reconcile','fleet','vendors','memo','settings'])
+  for(const v of ['board','queue','entry','reconcile','fleet','vendors','memo','dashboard','settings'])
     document.getElementById(v).hidden = F.view !== v;
   ({board:renderTable, queue:renderQueue, entry:renderEntry, reconcile:renderReconcile, fleet:renderFleet,
-    vendors:renderVendorsView, memo:renderMemo, settings:renderSettings})[F.view]();
+    vendors:renderVendorsView, memo:renderMemo, dashboard:renderDashboard, settings:renderSettings})[F.view]();
 
   document.getElementById('orgTag').textContent = S.settings.orgName || 'DHL · CJ';
   const mine = allCases().filter(c => c.source && c.source !== 'seed' && c.source !== 'import' && c.source !== 'reconcile').length;
