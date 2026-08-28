@@ -1,0 +1,17 @@
+# ตั้งค่าสำหรับ Netlify — ไม่ต้องแก้อะไร แค่ให้ไฟล์นี้อยู่ในโฟลเดอร์ด้วย
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/config.js"
+  [headers.values]
+    Cache-Control = "no-store"
