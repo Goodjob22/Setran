@@ -109,6 +109,7 @@ let rcImported = false;   /* true หลังกดนำเข้าแล้�
                              ให้เลือกเคสที่เพิ่งนำเข้าไปปิด/ออก Memo ต่อได้เลยโดยไม่ต้องสลับแท็บ */
 let rcLastImport = [];    /* เลขเคลมที่นำเข้ารอบล่าสุด — เผื่อนำเข้าผิด/ข้อมูลไม่ครบ จะได้ลบทั้งชุดได้ในคลิกเดียว
                              (จำได้แค่ในเซสชันนี้ รีเฟรชหน้าแล้วหาย ไม่ใช่ประวัติถาวร) */
+let rcReimportSelect = new Set();   /* เลือกเคสที่ยังไม่มีทะเบียนรถและยังไม่ปิด เพื่อลบเคสเดิมแล้วสร้างใหม่จากไฟล์ */
 
 /* ---------- สรุปยอด Pending ของรอบที่เลือกอยู่ ---------- */
 function pendingReportData(){
@@ -285,6 +286,13 @@ function parseReconcile(rows, cols){
         if(!existing.truck && out_.truck) fill.truck = out_.truck;
         if(!existing.driver && out_.driver) fill.driver = out_.driver;
         if(Object.keys(fill).length){ out_.backfillId = existing.id; out_.backfill = fill; }
+
+        /* เคสที่ยังไม่มีทะเบียนรถ และยังไม่เคยปิด/ออก Memo (ยังไม่มีใครไปทำงานต่อ) — ปลอดภัยพอจะลบเคสเดิม
+           ทิ้งแล้วสร้างใหม่จากไฟล์นี้ทั้งเคส (ได้ข้อมูลครบกว่าแค่เติมทะเบียน) เคสที่ปิด/มี Memo แล้วห้ามแตะเด็ดขาด */
+        if(!existing.truck){
+          const em = compute(existing);
+          if(em.status === 'OPEN') out_.reimportId = existing.id;
+        }
       }
       out.push(out_); continue;
     }
@@ -431,6 +439,8 @@ function showReconcilePreview(){
   const good = rcRows.filter(r => r.status !== 'skip');
   const skip = rcRows.filter(r => r.status === 'skip');
   const backfillable = rcRows.filter(r => r.backfill);
+  const reimportable = rcRows.filter(r => r.reimportId);
+  for(const id of [...rcReimportSelect]) if(!reimportable.some(r => r.reimportId === id)) rcReimportSelect.delete(id);
   document.getElementById('rcPreview').innerHTML = `
     <div class="tw" style="margin-top:14px"><table style="min-width:1240px"><thead><tr>
       <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th><th>พขร.</th><th>สาเหตุ</th>
@@ -457,11 +467,44 @@ function showReconcilePreview(){
     <div class="actions" style="margin-top:12px">
       <button type="button" class="pri" id="rcApply" ${good.length?'':'disabled'}>นำเข้า ${good.length} เคส</button>
       ${backfillable.length ? `<button type="button" id="rcBackfill">เติมสาขา/ทะเบียน/พขร. ที่ขาดให้เคสเดิม (${backfillable.length} เคส)</button>` : ''}
-      <span class="hint" style="margin:0">${skip.length} เคลมถูกข้าม (ซ้ำกับที่มีอยู่แล้ว)${backfillable.length?` · ${backfillable.length} เคสในนั้นเติมข้อมูลที่ขาดได้`:''}</span></div>`;
+      <span class="hint" style="margin:0">${skip.length} เคลมถูกข้าม (ซ้ำกับที่มีอยู่แล้ว)${backfillable.length?` · ${backfillable.length} เคสในนั้นเติมข้อมูลที่ขาดได้`:''}</span></div>
+    ${reimportable.length ? `
+    <div class="panel" style="margin-top:16px">
+      <div class="phead"><h3>เคสที่ยังไม่มีทะเบียนรถ (นำเข้าไว้ก่อนหน้า)</h3>
+        <span class="sp hint" style="margin:0">${reimportable.length} เคส — เฉพาะเคสที่ยังเปิดอยู่ ยังไม่ปิด/ไม่มีเลข Memo เท่านั้น</span></div>
+      <div class="pbody" style="padding:0">
+        <div class="tw" style="border:0"><table style="min-width:600px"><thead><tr>
+          <th style="width:30px"><input type="checkbox" id="rcReimportAll" ${reimportable.length && rcReimportSelect.size===reimportable.length?'checked':''}></th>
+          <th>เลขเคลม</th><th>สาขา</th><th style="text-align:right">ยอดในไฟล์</th></tr></thead><tbody>
+          ${reimportable.map(r => `<tr style="cursor:default">
+            <td onclick="event.stopPropagation()"><input type="checkbox" class="rcReimportPick" data-id="${esc(r.reimportId)}" ${rcReimportSelect.has(r.reimportId)?'checked':''}></td>
+            <td class="mono">${esc(r.id)}</td>
+            <td>${esc(r.store||'—')}</td>
+            <td class="r">${r.amt?r.amt.toLocaleString('th-TH',{minimumFractionDigits:2}):'—'}</td></tr>`).join('')}
+        </tbody></table></div>
+      </div>
+      <div class="pbody">
+        <div class="actions" style="margin:0">
+          <button type="button" id="rcReimport" ${rcReimportSelect.size?'':'disabled'}>ลบแล้วนำเข้าใหม่ (${rcReimportSelect.size} เคสที่เลือก)</button>
+        </div>
+      </div>
+    </div>` : ''}`;
   const ap = document.getElementById('rcApply');
   if(ap) ap.onclick = applyReconcileImport;
   const bf = document.getElementById('rcBackfill');
   if(bf) bf.onclick = applyBackfill;
+  document.querySelectorAll('.rcReimportPick').forEach(cb => cb.onchange = () => {
+    if(cb.checked) rcReimportSelect.add(cb.dataset.id); else rcReimportSelect.delete(cb.dataset.id);
+    showReconcilePreview();
+  });
+  const selAll = document.getElementById('rcReimportAll');
+  if(selAll) selAll.onchange = () => {
+    if(selAll.checked) reimportable.forEach(r => rcReimportSelect.add(r.reimportId));
+    else rcReimportSelect.clear();
+    showReconcilePreview();
+  };
+  const ri = document.getElementById('rcReimport');
+  if(ri) ri.onclick = applyReimport;
 }
 
 /* ---------- เติมสาขา/ทะเบียน/พขร. ที่ขาดให้เคสที่มีอยู่แล้ว — ไม่แตะฟิลด์ที่มีค่าอยู่แล้ว
@@ -481,17 +524,47 @@ async function applyBackfill(){
   toast(`เติมข้อมูลที่ขาดแล้ว ${updated} เคส${failed ? ` · ${failed} รายการไม่สำเร็จ` : ''}`);
 }
 
+/* ---------- ลบเคสเดิมที่ยังไม่มีทะเบียนรถแล้วสร้างใหม่จากไฟล์นี้ทั้งเคส ----------
+   ปลอดภัยกว่าลบทั้งชุดแบบ SQL ตรง ๆ เพราะเลือกเฉพาะเคสที่ parseReconcile() เห็นแล้วว่ายังเปิดอยู่
+   (ไม่เคยปิด ไม่เคยมีเลข Memo) เท่านั้น — เคสที่ทำงานต่อไปแล้วจะไม่ถูกแตะเด็ดขาด */
+async function applyReimport(){
+  const ids = [...rcReimportSelect];
+  if(!ids.length) return;
+  if(!confirm(`ลบเคสเดิม ${ids.length} เคส แล้วสร้างใหม่จากไฟล์นี้?\n\nระบบเลือกมาให้เฉพาะเคสที่ยังเปิดอยู่ (ยังไม่ปิด ไม่มีเลข Memo) เท่านั้น เคสที่ทำงานต่อแล้วจะไม่ถูกลบแน่นอน\n\nลบแล้วลบถาวร ไทม์ไลน์เดิมของเคสที่ลบจะหายไปด้วย (จะสร้างไทม์ไลน์ใหม่จากไฟล์แทน)`)) return;
+  const rows = rcRows.filter(r => ids.includes(r.reimportId));
+  let done = 0, failed = 0;
+  for(const r of rows){
+    try{
+      await API.delCase(r.reimportId);
+      delete S.cases[r.reimportId]; delete S.events[r.reimportId]; boardSelect.delete(r.reimportId);
+      const j = await API.addCase(buildCaseRecord(r, 'นำเข้าใหม่แทนเคสเดิมที่ข้อมูลไม่ครบ (ไม่มีทะเบียนรถ)'));
+      S.cases[r.id] = j.case;
+      done++;
+    }catch(e){ failed++; }
+  }
+  const st = await API.state();
+  S.events = st.events;
+  rcReimportSelect.clear();
+  render();
+  toast(`ลบแล้วนำเข้าใหม่ ${done} เคส${failed ? ` · ${failed} รายการไม่สำเร็จ` : ''}`);
+}
+
+/* ใช้ทั้งตอนนำเข้าเคสใหม่ และตอน "ลบแล้วนำเข้าใหม่" — สร้าง payload เคสจากแถวที่แปลงไฟล์ไว้แล้ว */
+function buildCaseRecord(r, note){
+  const at = r.atIso || isoLocal(NOW());
+  return {id:r.id, carrier:r.carrier, store:r.store, store_name:'', dept:'',
+    driver:r.driver, truck:r.truck, reason:r.reason, ref_date:at.slice(0,10),
+    amount:r.amt, ex_vat:r.exVat, vat:r.vat, items:r.items,
+    events:[{type:'RECEIVE', at, vendor:null, text:note || r.note || 'นำเข้าจากไฟล์สรุป Period', src:'reconcile'}],
+    source:'reconcile'};
+}
+
 async function applyReconcileImport(){
   const good = rcRows.filter(r => r.status !== 'skip');
   let added = 0, failed = 0;
   const importedIds = [];
   for(const r of good){
-    const at = r.atIso || isoLocal(NOW());
-    const rec = {id:r.id, carrier:r.carrier, store:r.store, store_name:'', dept:'',
-      driver:r.driver, truck:r.truck, reason:r.reason, ref_date:at.slice(0,10),
-      amount:r.amt, ex_vat:r.exVat, vat:r.vat, items:r.items,
-      events:[{type:'RECEIVE', at, vendor:null, text:r.note || 'นำเข้าจากไฟล์สรุป Period', src:'reconcile'}],
-      source:'reconcile'};
+    const rec = buildCaseRecord(r);
     try{
       const j = await API.addCase(rec);
       S.cases[r.id] = j.case;
