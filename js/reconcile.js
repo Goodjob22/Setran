@@ -64,7 +64,7 @@ const RC_ALIASES = {
   id:      ['claim_id (final)', 'claim id (final)', 'เลขเคลม', 'claim id'],
   carrier: ['ขนส่ง', 'carrier'],
   at:      ['deldate', 'delivery date', 'วันที่รับเมล', 'วันที่'],
-  store:   ['สาขา', 'store'],
+  store:   ['สาขา', 'store', 'st.', 'st'],
   truck:   ['ทะเบียนรถ', 'ทะเบียน', 'truck no', 'truck'],
   driver:  ['พขร.', 'พขร', 'truck driver', 'driver'],
   reason:  ['reason20', 'สาเหตุ', 'reason'],
@@ -94,6 +94,14 @@ function detectColumns(headerRow){
    (เช่น "Reject claim", "สาขายกเลิกเคลม", "สาขาตัด DA ผิด") ไม่มี ID ให้จับคู่หรือสร้างเคสได้
    ตามที่ตกลงกันไว้ว่าให้ข้ามไปเลยแบบเงียบ ๆ ไม่ต้องนับหรือแสดง */
 const looksLikeClaimId = s => /^[A-Za-z]{2,6}-/.test(String(s || '').trim());
+
+/* ---------- อ่านทะเบียนรถ/ชื่อ พขร. จากข้อความในหมายเหตุ — ไฟล์จริงไม่มีคอลัมน์แยก แต่ตัวปฏิบัติงาน
+   มักพิมพ์ "...โดยทะเบียน 71-7665 คุณประสิทธิ์ ; ..." ไว้ในหมายเหตุเสมอเวลาตรวจรับเสร็จแล้ว (เจอเกือบ 1 ใน 3
+   ของแถวจริง) ดึงมาเติมให้อัตโนมัติ ดีกว่าปล่อยว่างไว้ทั้งหมด ที่เหลือที่ดึงไม่ได้ก็ยังว่างเหมือนเดิม แก้เองทีหลังได้ */
+function extractTruckDriver(note){
+  const m = /ทะเบียน\s*([0-9]{1,3}-[0-9]{3,5})\s*คุณ\s*([ก-๙]+)/.exec(String(note || ''));
+  return m ? {truck:m[1], driver:m[2]} : null;
+}
 
 let RC = {periodKey: periodOf(NOW()).key};
 let rcRows = null;
@@ -148,8 +156,10 @@ function renderReconcile(){
         <span class="sp"><button type="button" class="sm" id="rcTemplate">โหลดไฟล์ตัวอย่าง (เทมเพลตง่าย)</button></span></div>
       <div class="pbody">
         <p class="hint">วางได้ทั้งสองแบบ: <b>(1)</b> คัดลอกทั้งชีตจากไฟล์สรุปจริงของขนส่ง (คอลัมน์
-          <span class="mono" style="font-size:12px">Claim_ID (Final) · Ex_vat · Vat · Net_amt · Reason20 · Deldate · Item No · Art_Desc · Note21</span>
-          ) มาวางได้เลย ระบบหาคอลัมน์ให้เอง ไม่ต้องเรียงคอลัมน์เอง หรือ <b>(2)</b> เทมเพลตง่าย 9 คอลัมน์เดิม
+          <span class="mono" style="font-size:12px">Claim_ID (Final) · Ex_vat · Vat · Net_amt · Reason20 · Deldate · St. · Item No · Art_Desc · Note21</span>
+          ) มาวางได้เลย ระบบหาคอลัมน์ให้เอง ไม่ต้องเรียงคอลัมน์เอง — สาขาอ่านจากคอลัมน์ <b>St.</b> โดยตรง ส่วนทะเบียนรถ/พขร.
+          ไม่มีคอลัมน์แยก แต่ลองอ่านจากข้อความในหมายเหตุให้ (เจอรูปแบบ "...โดยทะเบียน xx-xxxx คุณชื่อ..." ได้ประมาณ 1 ใน 3
+          ของแถว ที่เหลือว่างไว้ แก้เองทีหลังได้) หรือ <b>(2)</b> เทมเพลตง่าย 9 คอลัมน์เดิม
           (เลขเคลม · ขนส่ง · วันที่รับเมล · สาขา · ทะเบียนรถ · พขร. · สาเหตุ · ยอด · หมายเหตุ)</p>
         <p class="hint"><b>เลขเคลมที่มีอยู่แล้วในระบบจะถูกข้ามอัตโนมัติ ไม่นำเข้าซ้ำ</b> —
           ใช้จุดนี้ตรวจว่าที่คีย์รายวันไว้ครบกับไฟล์สรุปที่ขนส่งส่งมาไหม
@@ -237,6 +247,12 @@ function parseReconcile(rows, cols){
       mkTransport:first('mktransport'),
       note:[...new Set(grp.map(r => String(get(r,'note')||'').trim()).filter(Boolean))].join(' // '),
       exVat:0, vat:0, amt:0, items:[], status:'ok', msg:''};
+
+    /* ทะเบียนรถ/พขร. ไม่มีคอลัมน์แยกในไฟล์จริง — ลองดึงจากข้อความในหมายเหตุถ้ายังไม่มีค่าจากคอลัมน์ตรง ๆ */
+    if(!out_.truck || !out_.driver){
+      const td = extractTruckDriver(out_.note);
+      if(td){ if(!out_.truck) out_.truck = td.truck; if(!out_.driver) out_.driver = td.driver; }
+    }
 
     /* ยอด: รวม Ex_vat/Vat/Net_amt ของทุกบรรทัดสินค้าในเลขเคลมนี้ */
     for(const r of grp){
@@ -398,8 +414,8 @@ function showReconcilePreview(){
   const good = rcRows.filter(r => r.status !== 'skip');
   const skip = rcRows.filter(r => r.status === 'skip');
   document.getElementById('rcPreview').innerHTML = `
-    <div class="tw" style="margin-top:14px"><table style="min-width:1080px"><thead><tr>
-      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาเหตุ</th>
+    <div class="tw" style="margin-top:14px"><table style="min-width:1240px"><thead><tr>
+      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th><th>พขร.</th><th>สาเหตุ</th>
       <th style="text-align:right">รายการ</th><th style="text-align:right">Ex_vat</th>
       <th style="text-align:right">VAT</th><th style="text-align:right">Net_amt</th><th>ผลตรวจ</th></tr></thead><tbody>
       ${rcRows.slice(0, 300).map(r => `<tr style="cursor:default">
@@ -407,6 +423,9 @@ function showReconcilePreview(){
         <td class="mono">${esc(r.id || '—')}</td>
         <td>${esc(r.carrier || '—')}</td>
         <td class="mono" style="font-size:12px">${r.atIso ? fmt(r.atIso, true) : (r.atRaw ? esc(r.atRaw) : '—')}</td>
+        <td>${esc(r.store || '—')}</td>
+        <td class="mono">${esc(r.truck || '—')}</td>
+        <td>${esc(r.driver || '—')}</td>
         <td style="font-size:12px">${esc(r.reason || '—')}</td>
         <td class="r">${r.items.length || '—'}</td>
         <td class="r">${r.exVat ? r.exVat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
