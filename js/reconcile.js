@@ -99,6 +99,8 @@ let RC = {periodKey: periodOf(NOW()).key};
 let rcRows = null;
 let rcImported = false;   /* true หลังกดนำเข้าแล้ว — ซ่อนตารางตรวจก่อนนำเข้า แต่ตารางเทียบยอดยังโชว์ต่อ
                              ให้เลือกเคสที่เพิ่งนำเข้าไปปิด/ออก Memo ต่อได้เลยโดยไม่ต้องสลับแท็บ */
+let rcLastImport = [];    /* เลขเคลมที่นำเข้ารอบล่าสุด — เผื่อนำเข้าผิด/ข้อมูลไม่ครบ จะได้ลบทั้งชุดได้ในคลิกเดียว
+                             (จำได้แค่ในเซสชันนี้ รีเฟรชหน้าแล้วหาย ไม่ใช่ประวัติถาวร) */
 
 /* ---------- สรุปยอด Pending ของรอบที่เลือกอยู่ ---------- */
 function pendingReportData(){
@@ -203,6 +205,8 @@ function checkReconcileImport(){
     toast('หาคอลัมน์ "เลขเคลม" / "Claim_ID (Final)" ในหัวตารางไม่เจอ — ตรวจว่าคัดลอกมาครบทั้งแถวหัวตารางไหม');
     return;
   }
+  if(cols.exvat < 0 && cols.vat < 0 && cols.net < 0)
+    toast('ไม่พบคอลัมน์ยอดเงินเลย (Ex_vat / Vat / Net_amt) — ทุกเคสจะนำเข้าด้วยยอด 0 บาท ตรวจว่าคัดลอกครบทุกคอลัมน์ไหม');
   rcRows = parseReconcile(raw.slice(headerRowIdx + 1), cols);
   rcImported = false;
   showReconcilePreview();
@@ -251,6 +255,9 @@ function parseReconcile(rows, cols){
     out_.exVat = Math.round(out_.exVat*100)/100; out_.vat = Math.round(out_.vat*100)/100; out_.amt = Math.round(out_.amt*100)/100;
 
     if(caseIdExists(out_.id)){ out_.status = 'skip'; out_.msg = 'มีเคสนี้ในระบบแล้ว — ข้ามไม่นำเข้าซ้ำ'; out.push(out_); continue; }
+
+    /* ไม่เจอยอดเงินเลย (Ex_vat/Vat/Net_amt ว่างหรือหาคอลัมน์ไม่เจอทั้งหมด) — เตือนไว้ก่อนนำเข้าเป็น 0 บาทเงียบ ๆ */
+    if(!out_.amt) out_.status = 'warn', out_.msg = (out_.msg?out_.msg+' · ':'')+'ไม่พบยอดเงิน (Ex_vat/Vat/Net_amt) จะนำเข้าเป็น 0 บาท — ตรวจไฟล์หรือแก้ยอดทีหลัง';
 
     if(out_.carrier === 'DHL' || out_.carrier === 'CJ'){ /* ระบุมาแล้วในไฟล์ */ }
     else if(/^MKM-/i.test(out_.id)) out_.carrier = 'DHL';
@@ -337,7 +344,11 @@ function buildReconcileCompare(R){
 function renderReconcileCompare(groups){
   const box = document.getElementById('rcCompare');
   if(!box) return;
-  if(!groups.length){ box.innerHTML = ''; return; }
+  const undoBanner = rcLastImport.length ? `<div class="warnbox" style="margin-bottom:14px">
+    <b>นำเข้าไปแล้ว ${rcLastImport.length} เคสในรอบล่าสุด</b> — ถ้าเช็คแล้วพบว่าข้อมูลไม่ครบหรือผิด
+    ลบทั้งชุดคืนได้ในปุ่มเดียว <button type="button" class="sm" id="rcUndo" style="margin-left:8px">ลบเคสที่นำเข้ารอบล่าสุดทั้งหมด</button>
+  </div>` : '';
+  if(!groups.length){ box.innerHTML = undoBanner; bindUndo(); return; }
   const fmtAmt = v => v == null ? '—' : v.toLocaleString('th-TH', {minimumFractionDigits:2});
   const cmpChip = c => c === 'match' ? '<span class="chip ok">ตรงกัน</span>'
     : c === 'mismatch' ? '<span class="chip bad">ไม่ตรงกัน</span>'
@@ -348,6 +359,7 @@ function renderReconcileCompare(groups){
   const nFileOnly = groups.reduce((s,g) => s+g.items.filter(x=>x.cmp==='fileonly').length, 0);
 
   box.innerHTML = `
+    ${undoBanner}
     <div class="panel">
       <div class="phead"><h3>ตรวจสอบยอดตรงกัน — เรียงตามซับ</h3>
         <span class="sp hint" style="margin:0">ไม่ตรงกัน ${nMismatch} · มีแต่ในระบบ ${nSysOnly} · มีแต่ในไฟล์ ${nFileOnly}</span></div>
@@ -375,6 +387,11 @@ function renderReconcileCompare(groups){
     if(cb.checked) boardSelect.add(cb.dataset.id); else boardSelect.delete(cb.dataset.id);
     renderMemoBar();
   });
+  bindUndo();
+  function bindUndo(){
+    const b = document.getElementById('rcUndo');
+    if(b) b.onclick = undoLastImport;
+  }
 }
 
 function showReconcilePreview(){
@@ -410,6 +427,7 @@ function showReconcilePreview(){
 async function applyReconcileImport(){
   const good = rcRows.filter(r => r.status !== 'skip');
   let added = 0, failed = 0;
+  const importedIds = [];
   for(const r of good){
     const at = r.atIso || isoLocal(NOW());
     const rec = {id:r.id, carrier:r.carrier, store:r.store, store_name:'', dept:'',
@@ -421,13 +439,29 @@ async function applyReconcileImport(){
       const j = await API.addCase(rec);
       S.cases[r.id] = j.case;
       added++;
+      importedIds.push(r.id);
     }catch(e){ failed++; }
   }
   const st = await API.state();
   S.events = st.events;
   rcImported = true;
+  rcLastImport = importedIds;
   render();
   toast(`นำเข้าแล้ว ${added} เคส${failed ? ` · ${failed} รายการนำเข้าไม่สำเร็จ` : ''} — เลือกด้านล่างเพื่อปิดเคส/ออก Memo ต่อได้เลย`);
+}
+
+/* ---------- ลบเคสที่นำเข้ารอบล่าสุดทั้งชุด — เผื่อกดนำเข้าแล้วพบว่าข้อมูลไม่ครบ/ผิด ---------- */
+async function undoLastImport(){
+  if(!rcLastImport.length) return;
+  if(!confirm(`ลบเคสที่นำเข้ารอบล่าสุดทั้งหมด ${rcLastImport.length} เคส?\n\nลบแล้วลบถาวร รวมประวัติ/บันทึกใด ๆ ที่เพิ่มเข้าไปหลังนำเข้า (เช่น ทำเครื่องหมายรับเคลม หรือใส่เลข Memo ไปแล้ว) ก็จะหายไปด้วย`)) return;
+  let removed = 0;
+  for(const id of rcLastImport){
+    try{ await API.delCase(id); delete S.cases[id]; delete S.events[id]; boardSelect.delete(id); removed++; }
+    catch(e){}
+  }
+  rcLastImport = [];
+  render();
+  toast(`ลบเคสที่นำเข้าไว้แล้ว ${removed} เคส`);
 }
 
 /* ---------- ส่งออก / คัดลอกรายงาน Pending ราย Period ---------- */
