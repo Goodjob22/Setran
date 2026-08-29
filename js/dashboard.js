@@ -1,5 +1,5 @@
 /* ============================================================
-   dashboard.js — ภาพรวมทั้งปี แยกรายเดือน (หรือราย Period 15–15) และแยก BU (คลัง)
+   dashboard.js — ภาพรวมทั้งปี แยกรายเดือน (หรือราย Period 16–15) และแยก BU (คลัง)
    นับตามวันที่รับเมล (m.t0) ของแต่ละเคส เหมือนหน้าอื่นในระบบ
 
    สามสถานะ (ตรงกับที่ใช้ในหน้าสรุป/Memo และชิปสถานะที่กระดานเคส):
@@ -10,7 +10,7 @@
 const MONTH_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 let DASH = {year: NOW().getFullYear(), mode:'month'};
 
-/* ---------- ช่องเวลา 12 ช่องของปี — โหมดเดือนปฏิทิน หรือโหมด Period 15–15 ---------- */
+/* ---------- ช่องเวลา 12 ช่องของปี — โหมดเดือนปฏิทิน หรือโหมด Period 16–15 ---------- */
 function monthBuckets(year){
   return Array.from({length:12}, (_, i) => ({
     label: MONTH_TH[i], title: `${MONTH_TH[i]} ${year+543}`,
@@ -18,7 +18,7 @@ function monthBuckets(year){
 }
 function periodBuckets(year){
   return Array.from({length:12}, (_, i) => {
-    const start = new Date(year, i, 15), end = new Date(year, i+1, 15);
+    const start = new Date(year, i, 16), end = new Date(year, i+1, 16);
     return {label:`${pad(start.getDate())}/${pad(start.getMonth()+1)}`,
             title: periodLabel({start, end}), start, end};
   });
@@ -117,11 +117,11 @@ function renderDashboard(){
     </div>
 
     <div class="panel">
-      <div class="phead"><h3>แยกราย${periodMode ? ' Period (15–15)' : 'เดือน'}</h3>
+      <div class="phead"><h3>แยกราย${periodMode ? ' Period (16–15)' : 'เดือน'}</h3>
         <span class="sp">
           <div class="seg" id="dashModeSeg">
             <button data-mode="month" aria-pressed="${!periodMode}">เดือนปฏิทิน</button>
-            <button data-mode="period" aria-pressed="${periodMode}">Period (15–15)</button>
+            <button data-mode="period" aria-pressed="${periodMode}">Period (16–15)</button>
           </div>
           <button type="button" class="sm" id="dashExportMonth">ส่งออก CSV</button></span></div>
       <div class="pbody">

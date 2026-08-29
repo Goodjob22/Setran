@@ -1,25 +1,25 @@
 /* ============================================================
-   reconcile.js — นำเข้าไฟล์สรุป Period (15–15) มาเทียบกับที่คีย์รายวัน
+   reconcile.js — นำเข้าไฟล์สรุป Period (16–15) มาเทียบกับที่คีย์รายวัน
    ------------------------------------------------------------
    ทำไมต้องมี: เคสถูกคีย์เข้าระบบทุกวันอยู่แล้วที่หน้า "คีย์งานเข้า"
    แต่ขนส่งส่งไฟล์สรุปมาอีกทีเป็นรอบ ไฟล์นี้ใช้ไล่เทียบว่าตรงกันไหม
    เลขเคลมที่มีอยู่แล้วในระบบจะถูกข้ามอัตโนมัติ ไม่นำเข้าซ้ำ
 
-   พีเรียด = วันที่ 15 ของเดือนหนึ่ง ถึงวันที่ 15 ของเดือนถัดไป (ไม่รวมวันที่ 15 ที่สอง)
+   พีเรียด = วันที่ 16 ของเดือนหนึ่ง ถึงวันที่ 15 ของเดือนถัดไป (เก็บแบบไม่รวมวันที่ 16 ถัดไป)
    ใช้ตัดรอบรายงาน ไม่ใช่ตัดรอบว่าไฟล์มาถึงวันไหน — คำนวณจากวันที่รับเมลของแต่ละเคส (m.t0)
    ============================================================ */
 
-/* ---------- คำนวณพีเรียด 15–15 ---------- */
+/* ---------- คำนวณพีเรียด 16–15 (วันที่ 16 ของเดือนหนึ่ง ถึงวันที่ 15 ของเดือนถัดไป) ---------- */
 function periodOf(d){
   const y = d.getFullYear(), mo = d.getMonth(), day = d.getDate();
-  const sm = day >= 15 ? mo : mo - 1;
-  const start = new Date(y, sm, 15);
-  const end   = new Date(y, sm + 1, 15);
+  const sm = day >= 16 ? mo : mo - 1;
+  const start = new Date(y, sm, 16);
+  const end   = new Date(y, sm + 1, 16);
   return {start, end, key:`${start.getFullYear()}-${pad(start.getMonth()+1)}`};
 }
 function periodFromKey(key){
   const [y, m] = key.split('-').map(Number);
-  return {start:new Date(y, m-1, 15), end:new Date(y, m, 15), key};
+  return {start:new Date(y, m-1, 16), end:new Date(y, m, 16), key};
 }
 function shiftPeriod(key, delta){
   const [y, m] = key.split('-').map(Number);
@@ -27,10 +27,10 @@ function shiftPeriod(key, delta){
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
 }
 function periodLabel(p){
-  /* โชว์วันเริ่มถึงวันสิ้นสุดตรงตัว (15/xx – 15/xx) ตามที่ตกลงกัน
-     ไม่หักออกหนึ่งวันแม้ช่วงจะนับแบบไม่รวมวันสิ้นสุดก็ตาม */
+  /* พีเรียด 16–15 ตัวช่วงเก็บแบบไม่รวมวันสิ้นสุด (exclusive) จึงหักออกหนึ่งวันตอนแสดงผล
+     ให้ได้ "16/xx – 15/xx+1" ตรงกับชื่อพีเรียดจริง */
   const th = d => `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()+543}`;
-  return `${th(p.start)} – ${th(p.end)}`;
+  return `${th(p.start)} – ${th(new Date(p.end.getTime() - 864e5))}`;
 }
 
 /* ---------- อ่านวันที่แบบยืดหยุ่น — ไฟล์จากขนส่งเขียนวันที่ไม่เหมือนกันเสมอไป ---------- */
@@ -63,7 +63,7 @@ function renderReconcile(){
 
   document.getElementById('reconcile').innerHTML = `
     <div class="panel">
-      <div class="phead"><h3>สรุปยอด Pending ราย Period (15–15)</h3>
+      <div class="phead"><h3>สรุปยอด Pending ราย Period (16–15)</h3>
         <span class="sp">
           <button type="button" class="sm" id="rcPrev">‹ Period ก่อนหน้า</button>
           <span class="mono" style="font-size:12.5px">${periodLabel(R.p)}</span>
