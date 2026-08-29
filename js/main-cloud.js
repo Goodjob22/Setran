@@ -10,6 +10,9 @@ function setView(v){
 
 function render(){
   recompute();
+  /* แถบเลือกหลายเคส (ทำเครื่องหมายซับรับเคลม/ใส่เลข Memo) ใช้ร่วมกันได้ทุกแท็บ ไม่ใช่แค่หน้ากระดาน
+     เช่น เลือกจากตารางเทียบยอดในหน้า "นำเข้าสรุป Period" ก็ได้ จึงต้องอัปเดตทุกครั้งที่ render ไม่ใช่แค่ตอนอยู่หน้ากระดาน */
+  renderMemoBar();
   const isCase = ['board','queue','memo'].includes(F.view);
   document.getElementById('vsec').hidden = !isCase;
   document.getElementById('alert').hidden = !isCase;

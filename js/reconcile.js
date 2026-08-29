@@ -97,6 +97,8 @@ const looksLikeClaimId = s => /^[A-Za-z]{2,6}-/.test(String(s || '').trim());
 
 let RC = {periodKey: periodOf(NOW()).key};
 let rcRows = null;
+let rcImported = false;   /* true หลังกดนำเข้าแล้ว — ซ่อนตารางตรวจก่อนนำเข้า แต่ตารางเทียบยอดยังโชว์ต่อ
+                             ให้เลือกเคสที่เพิ่งนำเข้าไปปิด/ออก Memo ต่อได้เลยโดยไม่ต้องสลับแท็บ */
 
 /* ---------- สรุปยอด Pending ของรอบที่เลือกอยู่ ---------- */
 function pendingReportData(){
@@ -179,7 +181,11 @@ function renderReconcile(){
     r.readAsText(f, 'utf-8');
   };
   document.getElementById('rcCheck').onclick = checkReconcileImport;
-  if(rcRows){ showReconcilePreview(); renderReconcileCompare(buildReconcileCompare(R)); }
+  if(rcRows){
+    if(rcImported) document.getElementById('rcPreview').innerHTML = '';
+    else showReconcilePreview();
+    renderReconcileCompare(buildReconcileCompare(R));
+  }
 }
 
 /* ---------- ตรวจข้อมูลก่อนนำเข้า ---------- */
@@ -198,6 +204,7 @@ function checkReconcileImport(){
     return;
   }
   rcRows = parseReconcile(raw.slice(headerRowIdx + 1), cols);
+  rcImported = false;
   showReconcilePreview();
   renderReconcileCompare(buildReconcileCompare(pendingReportData()));
 }
@@ -305,7 +312,11 @@ function buildReconcileCompare(R){
       else if(byMk){ vendor = byMk; vendorSrc = 'MK Transport'; }
       else if(byNote){ vendor = byNote; vendorSrc = 'เดาจากหมายเหตุ'; }
     }
-    rows.push({id: sys ? sys.c.id : file.id, vendor, vendorSrc, cmp, sysAmt, fileAmt});
+    /* เลือกได้เฉพาะเคลมที่มีเคสในระบบจริงแล้ว และยังไม่ได้ปิด+ออก Memo ครบ — เอาไว้เลือกปิดเคส/ออก Memo
+       ต่อจากตารางนี้ได้เลย โดยไม่ต้องสลับไปหน้ากระดาน (ใช้ Set ตัวเลือกร่วมกับหน้ากระดาน) */
+    const pickable = !!sys && (sys.m.status === 'OPEN' || (sys.m.status === 'CLOSED' && !sys.m.memoNo));
+    rows.push({id: sys ? sys.c.id : file.id, vendor, vendorSrc, cmp, sysAmt, fileAmt, pickable,
+      status: sys ? sys.m.status : null});
   }
 
   const groups = new Map();
@@ -340,14 +351,18 @@ function renderReconcileCompare(groups){
     <div class="panel">
       <div class="phead"><h3>ตรวจสอบยอดตรงกัน — เรียงตามซับ</h3>
         <span class="sp hint" style="margin:0">ไม่ตรงกัน ${nMismatch} · มีแต่ในระบบ ${nSysOnly} · มีแต่ในไฟล์ ${nFileOnly}</span></div>
+      <p class="hint" style="margin:10px 18px 0">ติ๊กเลือกเคลมที่มีเคสในระบบแล้ว (คอลัมน์ซ้ายสุด) แล้วใช้แถบด้านบนสุดของหน้า
+        เพื่อทำเครื่องหมายซับรับเคลม/ใส่เลข Memo ต่อได้เลย ไม่ต้องสลับไปหน้ากระดาน</p>
       <div class="pbody" style="padding:0">
         ${groups.map(g => `
-          <div class="tw" style="border-top:1px solid var(--rule)"><table style="min-width:760px"><thead>
-            <tr><th colspan="5"><b>${esc(g.vendor)}</b> — ${g.items.length} เคลม ·
+          <div class="tw" style="border-top:1px solid var(--rule)"><table style="min-width:800px"><thead>
+            <tr><th colspan="6"><b>${esc(g.vendor)}</b> — ${g.items.length} เคลม ·
               ยอดระบบ ${fmtAmt(g.sysTotal)} บาท · ยอดไฟล์ ${fmtAmt(g.fileTotal)} บาท</th></tr>
-            <tr><th>เลขเคลม</th><th style="text-align:right">ยอดในระบบ</th><th style="text-align:right">ยอดในไฟล์</th>
-              <th>ที่มาซับ</th><th>ผลตรวจ</th></tr></thead>
+            <tr><th style="width:30px"></th><th>เลขเคลม</th><th style="text-align:right">ยอดในระบบ</th>
+              <th style="text-align:right">ยอดในไฟล์</th><th>ที่มาซับ</th><th>ผลตรวจ</th></tr></thead>
             <tbody>${g.items.map(x => `<tr style="cursor:default">
+              <td onclick="event.stopPropagation()">${x.pickable
+                ? `<input type="checkbox" class="rcPick" data-id="${esc(x.id)}" ${boardSelect.has(x.id)?'checked':''}>` : ''}</td>
               <td class="mono">${esc(x.id)}</td>
               <td class="r">${fmtAmt(x.sysAmt)}</td>
               <td class="r">${fmtAmt(x.fileAmt)}</td>
@@ -356,6 +371,10 @@ function renderReconcileCompare(groups){
             </tbody></table></div>`).join('')}
       </div>
     </div>`;
+  box.querySelectorAll('.rcPick').forEach(cb => cb.onchange = () => {
+    if(cb.checked) boardSelect.add(cb.dataset.id); else boardSelect.delete(cb.dataset.id);
+    renderMemoBar();
+  });
 }
 
 function showReconcilePreview(){
@@ -406,9 +425,9 @@ async function applyReconcileImport(){
   }
   const st = await API.state();
   S.events = st.events;
-  rcRows = null;
+  rcImported = true;
   render();
-  toast(`นำเข้าแล้ว ${added} เคส${failed ? ` · ${failed} รายการนำเข้าไม่สำเร็จ` : ''}`);
+  toast(`นำเข้าแล้ว ${added} เคส${failed ? ` · ${failed} รายการนำเข้าไม่สำเร็จ` : ''} — เลือกด้านล่างเพื่อปิดเคส/ออก Memo ต่อได้เลย`);
 }
 
 /* ---------- ส่งออก / คัดลอกรายงาน Pending ราย Period ---------- */
