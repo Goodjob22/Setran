@@ -12,6 +12,7 @@ function inRange(m){
   return true;
 }
 function memoSet(){
+  const q = F.q.trim().toLowerCase();
   return CACHE.filter(({c,m,bu}) => {
     if(!inRange(m)) return false;
     if(F.carrier !== 'all' && c.carrier !== F.carrier) return false;
@@ -19,6 +20,7 @@ function memoSet(){
     if(!vendorPass(m)) return false;
     if(M.scope === 'open'   && m.status !== 'OPEN')   return false;
     if(M.scope === 'closed' && m.status !== 'CLOSED') return false;
+    if(q && ![c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason].join(' ').toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -62,6 +64,7 @@ function rangeLabel(){
 
 function renderMemo(){
   const list = memoSet(), T = agg(list), V = byVendor(list);
+  document.getElementById('count').textContent = `${list.length} เคสในรายงาน`;
   /* เคสที่ปิดแล้วแต่ยังไม่ได้ออกเลข Memo — "รอเปิด Memo" */
   const pendingMemo = T.closed - T.memoed, pendingMemoAmt = T.closedAmt - T.memoedAmt;
   const memoedPct = T.closed ? Math.round(T.memoed / T.closed * 100) : null;
@@ -108,9 +111,10 @@ function renderMemo(){
           <button data-q="7">7 วัน</button><button data-q="30">30 วัน</button>
           <button data-q="month">เดือนนี้</button><button data-q="all">ทั้งหมด</button></div></div>
       </div>
-      <p class="hint" style="margin:12px 0 0">ตัวกรองซับ ขนส่ง และ BU ใช้ร่วมกับแถบด้านบน — ตอนนี้กรอง
+      <p class="hint" style="margin:12px 0 0">ตัวกรองซับ ขนส่ง BU และคำค้น ใช้ร่วมกับแถบด้านบน (ปุ่มสถานะด้านบนซ่อนไว้ที่หน้านี้
+        เพราะมี "ขอบเขต" ของตัวเองด้านบนแล้ว) — ตอนนี้กรอง
         <b>${F.vendor==='all'?'ทุกซับ':esc(F.vendor)}</b> · <b>${F.carrier==='all'?'ทุกขนส่ง':F.carrier}</b> ·
-        <b>${F.bu==='all'?'ทุก BU':esc(F.bu)}</b> · ${scopeName} · ${rangeLabel()}</p>
+        <b>${F.bu==='all'?'ทุก BU':esc(F.bu)}</b> · ${scopeName} · ${rangeLabel()}${F.q.trim()?` · ค้นหา "${esc(F.q.trim())}"`:''}</p>
     </div></div>
 
     <div class="totrow">

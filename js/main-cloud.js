@@ -14,10 +14,17 @@ function render(){
   document.getElementById('vsec').hidden = !isCase;
   document.getElementById('alert').hidden = !isCase;
   document.getElementById('filterBar').hidden = !isCase && F.view !== 'fleet';
+  /* สถานะ (ยังไม่ปิด/เกิน 48 ชม./ปิดแล้ว/ข้อมูลน่าสงสัย) มีความหมายเฉพาะหน้ากระดาน/คิว — หน้า Memo มีตัวกรอง
+     "ขอบเขต" ของตัวเองอยู่แล้ว (เคสค้าง/เคสสำเร็จ) ส่วนหน้าทะเบียนรถไม่มีสถานะเคสรายทะเบียน จึงซ่อนแถบนี้ไว้
+     กันสับสนว่ากดแล้วทำไมไม่มีผล */
+  document.getElementById('statusSeg').hidden = (F.view === 'memo' || F.view === 'fleet');
   document.querySelectorAll('#statusSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.st === F.status));
   document.querySelectorAll('#carrierSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.cr === F.carrier));
 
   const buSeg = document.getElementById('buSeg');
+  /* หน้าทะเบียนรถมีตัวกรอง BU ของตัวเองอยู่แล้ว (#fleetBUSeg ผูกกับ fleetBU) ซ่อนอันนี้กันมีสองปุ่ม BU
+     ซ้อนกันบนจอเดียว ซึ่งปุ่มนี้จะไม่มีผลอะไรกับรายการทะเบียนที่เห็นเลย */
+  buSeg.hidden = (F.view === 'fleet');
   const bus = buList();
   buSeg.innerHTML = `<button data-bu="all" aria-pressed="${F.bu==='all'}">ทุก BU</button>` +
     bus.map(b => `<button data-bu="${esc(b)}" aria-pressed="${F.bu===b}">${esc(b)}</button>`).join('');
@@ -58,13 +65,14 @@ document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e =
 addEventListener('resize', syncTop);
 
 document.getElementById('btnMailAll').onclick = () => openMail();
+document.getElementById('memoBarAccept').onclick = () => bulkAccept();
 document.getElementById('memoBarGo').onclick = () => openMemoAssign();
-document.getElementById('memoBarClear').onclick = () => { memoSelect.clear(); render(); };
+document.getElementById('memoBarClear').onclick = () => { boardSelect.clear(); render(); };
 document.getElementById('btnExportCase').onclick = () => {
-  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ชื่อสาขา','ทะเบียน','พขร.','ซับปัจจุบัน','ยอด','สาเหตุ',
+  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ชื่อสาขา','ทะเบียน','พขร.','ซับปัจจุบัน','ยอดก่อน VAT','VAT','ยอด','สาเหตุ',
     'รับเมล','ครบกำหนด','ปิดเมื่อ','ใช้เวลา(ชม.)','ซับถือเคส(ชม.)','ค้างฝั่งเรา(ชม.)','สถานะ','SLA','ธงตรวจสอบ']];
   for(const {c,m,bu} of visible()) rows.push([c.id, c.carrier, bu, c.store, c.store_name, c.truck, c.driver,
-    m.vendor, c.amount, c.reason, m.t0?fmt(m.t0,true):'', m.deadline?fmt(isoLocal(m.deadline),true):'',
+    m.vendor, c.ex_vat||'', c.vat||'', c.amount, c.reason, m.t0?fmt(m.t0,true):'', m.deadline?fmt(isoLocal(m.deadline),true):'',
     m.tEnd?fmt(m.tEnd,true):'', m.el?.toFixed(2), m.legs.reduce((s,l)=>s+l.h,0).toFixed(2),
     m.internal?.toFixed(2), m.status, m.sla, m.flags.map(f=>f.k).join(' ')]);
   download(`claim-cases-${stamp()}.csv`, csv(rows));

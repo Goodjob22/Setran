@@ -11,6 +11,8 @@ function storeOptions(){
   for(const c of allCases()) if(c.store) m.set(String(c.store), c.store_name || '');
   return [...m.entries()].sort((a,b) => (+a[0]||0) - (+b[0]||0));
 }
+const storeKey = s => String(s||'').trim().toLowerCase();
+const findStore = input => storeOptions().find(([id]) => storeKey(id) === storeKey(input)) || null;
 const caseIdExists = id => !!S.cases[String(id).trim()] ||
   allCases().some(c => c.id.toUpperCase() === String(id).trim().toUpperCase());
 
@@ -55,9 +57,12 @@ function renderEntry(){
             <span class="inline-hint" id="eVendorHint"></span></div>
         </div>
         <div class="frow">
-          <div class="fld"><label for="eStore">สาขา *</label>
-            <select id="eStore"><option value="">— เลือก —</option>
-              ${stores.map(([id,nm])=>`<option value="${esc(id)}">${esc(id)}${nm?' — '+esc(nm):''}</option>`).join('')}</select></div>
+          <div class="fld"><label for="eStore">รหัสสาขา *</label>
+            <input type="text" id="eStore" required autocomplete="off" list="eStoreList" placeholder="พิมพ์รหัสสาขา">
+            <datalist id="eStoreList">${stores.map(([id])=>`<option value="${esc(id)}">`).join('')}</datalist>
+            <span class="inline-hint" id="eStoreHint"></span></div>
+          <div class="fld" style="max-width:200px"><label for="eStoreName">ชื่อสาขา</label>
+            <input type="text" id="eStoreName" autocomplete="off" placeholder="ชื่อสาขา"></div>
           <div class="fld" style="max-width:165px"><label for="eTruck">ทะเบียนรถ *</label>
             <input type="text" id="eTruck" required autocomplete="off" placeholder="71-4708">
             <span class="inline-hint" id="eTruckHint"></span></div>
@@ -79,6 +84,14 @@ function renderEntry(){
         </tr></thead><tbody id="eItems"></tbody>
         <tfoot><tr><td colspan="5"><button type="button" class="sm gh" id="eAddItem" style="color:var(--accent)">+ เพิ่มรายการ</button></td>
           <td class="r" style="font-weight:600" id="eTotal">0.00</td><td></td></tr></tfoot></table></div>
+
+        <div class="frow">
+          <div class="fld" style="max-width:150px"><label for="eExVat">ยอดก่อน VAT</label>
+            <input type="text" id="eExVat" inputmode="decimal" placeholder="ถ้ามีแยก VAT"></div>
+          <div class="fld" style="max-width:120px"><label for="eVat">VAT</label>
+            <input type="text" id="eVat" inputmode="decimal" placeholder="ไม่บังคับ"></div>
+          <span class="hint" style="align-self:center;margin-top:16px">ไม่บังคับ — ถ้ายังไม่มีข้อมูล VAT แยก เว้นว่างได้ ยอดรวมด้านบนใช้เป็นยอดเคลมเหมือนเดิม</span>
+        </div>
 
         <div class="frow"><div class="fld"><label for="eNote">หมายเหตุ</label>
           <textarea id="eNote" placeholder="พิมพ์อิสระ — ไม่ถูกนำไปคำนวณเวลา"></textarea></div></div>
@@ -132,7 +145,7 @@ function renderEntry(){
     } else { el.classList.add('good'); okEl.innerHTML = '<span style="color:var(--ok)">เลขนี้ยังไม่มีในระบบ</span>'; }
   };
   $('eTruck').oninput = checkTruck;
-  $('eStore').onchange = checkNear;
+  $('eStore').oninput = () => { checkStore(); checkNear(); };
   $('eAddItem').onclick = () => { E.items.push({}); renderItems(); };
   $('eClear').onclick = () => { E.items = [{}]; render(); };
   $('eForm').onsubmit = ev => { ev.preventDefault(); saveEntry(true); };
@@ -230,6 +243,18 @@ function renderEntry(){
     $('eWarn').innerHTML = dup
       ? `<div class="warnbox"><b>อาจเป็นเคสเดียวกัน:</b> มีเคส <b>${esc(dup.c.id)}</b> ทะเบียนเดียวกัน สาขาเดียวกัน วันเดียวกันอยู่แล้ว — ตรวจก่อนบันทึก</div>` : '';
   }
+  /* พิมพ์รหัสสาขาที่เคยมี = เติมชื่อให้อัตโนมัติ / รหัสใหม่ = ให้กรอกชื่อเองได้ */
+  function checkStore(){
+    const hint = $('eStoreHint'), v = $('eStore').value;
+    if(!v.trim()){ hint.textContent = ''; return; }
+    const found = findStore(v);
+    if(found){
+      hint.innerHTML = `<span style="color:var(--ok)">สาขาเดิม${found[1]?' — '+esc(found[1]):''}</span>`;
+      if(!$('eStoreName').value.trim()) $('eStoreName').value = found[1] || '';
+    } else {
+      hint.innerHTML = '<span style="color:var(--muted)">สาขาใหม่ ยังไม่เคยมีเคส — กรอกชื่อสาขาได้</span>';
+    }
+  }
 }
 
 function renderItems(){
@@ -267,13 +292,17 @@ const itemTotal = () => E.items.reduce((s,it) => s + (parseFloat(it.amt)||0), 0)
 async function saveEntry(keepGoing){
   const $ = id => document.getElementById(id);
   const at = $('eAt').value, id = $('eId').value.trim(), vendor = $('eVendor').value;
-  const truck = $('eTruck').value.trim(), store_ = $('eStore').value;
+  const truck = $('eTruck').value.trim(), storeRaw = $('eStore').value.trim();
   if(!at)    { $('eAt').reportValidity(); return; }
   if(!id)    { $('eId').reportValidity(); return; }
   if(caseIdExists(id)){ toast('เลขเคลมซ้ำ — บันทึกไม่ได้'); $('eId').focus(); return; }
   if(!vendor){ toast('ต้องเลือกซับที่ส่งต่อ'); $('eVendor').focus(); return; }
-  if(!store_){ toast('ต้องเลือกสาขา'); $('eStore').focus(); return; }
+  if(!storeRaw){ toast('ต้องกรอกรหัสสาขา'); $('eStore').focus(); return; }
   if(!truck) { toast('ต้องกรอกทะเบียนรถ'); $('eTruck').focus(); return; }
+  /* รหัสสาขาที่เคยมีอยู่แล้ว (ต่างแค่ตัวพิมพ์เล็ก-ใหญ่หรือช่องว่าง) ให้ใช้รหัสเดิมเป๊ะ กันสาขาซ้ำ */
+  const foundStore = findStore(storeRaw);
+  const store_ = foundStore ? foundStore[0] : storeRaw;
+  const storeName = $('eStoreName').value.trim() || (foundStore ? foundStore[1] : '');
   const dup = nearDuplicate(truck, store_, at);
   if(dup && !confirm(`มีเคส ${dup.c.id} ทะเบียน สาขา และวันเดียวกันอยู่แล้ว\n\nยืนยันว่าเป็นคนละเคสและบันทึกต่อ?`)) return;
 
@@ -282,11 +311,11 @@ async function saveEntry(keepGoing){
     qty_load:it.load??'', qty_rec:it.rec??'',
     qty_diff:(it.rec!==''&&it.rec!=null&&it.load!==''&&it.load!=null)?String(+it.rec - +it.load):'',
     amt: parseFloat(it.amt) || null, reason:$('eReason').value}));
-  const opt = $('eStore').selectedOptions[0];
   const rec = {
-    id, carrier:E.carrier, store:store_, store_name:(opt ? (opt.textContent.split(' — ')[1] || '') : ''),
+    id, carrier:E.carrier, store:store_, store_name:storeName,
     dept:$('eDept').value, driver:$('eDriver').value.trim(), truck,
     reason:$('eReason').value, ref_date:at.slice(0,10), amount:Math.round(itemTotal()*100)/100, items,
+    ex_vat:parseFloat($('eExVat').value) || 0, vat:parseFloat($('eVat').value) || 0,
     events:[{type:'RECEIVE', at, vendor, text:$('eNote').value.trim() || `คีย์เข้าระบบ — ส่งต่อ ${vendor}`, src:'entry'}],
     source:'entry',
   };

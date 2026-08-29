@@ -71,13 +71,14 @@ const inEvent  = e => ({ type:e.type, at:e.at || null, vendor:e.vendor || null,
 const outCase = c => ({ id:c.id, carrier:c.carrier, store:c.store, store_name:c.store_name,
   dept:c.dept, driver:c.driver, truck:c.truck, ref_date:c.ref_date,
   t0:c.t0 ? String(c.t0).slice(0,16) : null, amount:Number(c.amount||0),
+  ex_vat:Number(c.ex_vat||0), vat:Number(c.vat||0),
   reason:c.reason, items:c.items||[], bu:c.bu, source:c.source, createdAt:c.created_at,
   t0fix:c.t0fix ? String(c.t0fix).slice(0,16) : null, t0why:c.t0why || '' });
 const inCase = c => {
   const o = {};
   const map = { id:'id', carrier:'carrier', store:'store', store_name:'store_name',
     dept:'dept', driver:'driver', truck:'truck', ref_date:'ref_date', t0:'t0',
-    amount:'amount', reason:'reason', items:'items', source:'source',
+    amount:'amount', ex_vat:'ex_vat', vat:'vat', reason:'reason', items:'items', source:'source',
     t0fix:'t0fix', t0why:'t0why' };
   for(const [js, col] of Object.entries(map)) if(js in c) o[col] = c[js];
   if('ref_date' in o && !o.ref_date) o.ref_date = null;

@@ -63,7 +63,9 @@ create table if not exists public.cases (
   truck      text default '',
   ref_date   date,
   t0         timestamp,                      -- เวลาไทยตรง ๆ ไม่แปลงโซนเวลา
-  amount     numeric(12,2) default 0,
+  amount     numeric(12,2) default 0,        -- ยอดเคลมสุทธิ (รวม VAT แล้ว = Net_amt)
+  ex_vat     numeric(12,2) default 0,        -- ยอดก่อน VAT (จากไฟล์สรุป Period)
+  vat        numeric(12,2) default 0,        -- ยอด VAT (จากไฟล์สรุป Period)
   reason     text default '',
   items      jsonb not null default '[]'::jsonb,
   t0fix      timestamp,                      -- เวลารับเมลที่แก้ด้วยมือ (ทับค่าที่อ่านจากไฟล์)
@@ -121,6 +123,8 @@ alter table public.trucks add column if not exists roster text[] not null defaul
 alter table public.trucks add column if not exists roster_note text default '';
 alter table public.cases  add column if not exists t0fix timestamp;
 alter table public.cases  add column if not exists t0why text default '';
+alter table public.cases  add column if not exists ex_vat numeric(12,2) default 0;
+alter table public.cases  add column if not exists vat numeric(12,2) default 0;
 
 alter table public.events drop constraint if exists events_type_check;
 alter table public.events add  constraint events_type_check check (type in

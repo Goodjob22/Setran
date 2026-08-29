@@ -83,15 +83,38 @@ function statusChip(m){
        : '<span class="chip ok">อยู่ในกรอบ</span>';
 }
 
-/* เคสที่เลือกไว้เพื่อออกเลข Memo พร้อมกันหลายเคส — เลือกได้เฉพาะเคสที่ปิดแล้วและยังไม่มีเลข Memo
-   (เคสที่มีเลข Memo อยู่แล้วต้องแก้ทีละเคสจากหน้ารายละเอียด เพราะแต่ละเคสมีเลขเดิมต่างกัน) */
-let memoSelect = new Set();
+/* เคสที่เลือกไว้เพื่อทำงานหลายเคสพร้อมกัน — เลือกได้ทั้งเคสที่ยังเปิดอยู่ (เพื่อทำเครื่องหมายซับรับเคลม
+   ทีเดียวหลายเคส) และเคสที่ปิดแล้วแต่ยังไม่มีเลข Memo (เพื่อใส่เลข Memo เดียวกันให้หลายเคส) — เคสที่มีเลข
+   Memo อยู่แล้วต้องแก้ทีละเคสจากหน้ารายละเอียด เพราะแต่ละเคสมีเลขเดิมต่างกัน จึงไม่มีให้เลือกตรงนี้ */
+let boardSelect = new Set();
 function renderMemoBar(){
   const bar = document.getElementById('memoBar');
-  if(memoSelect.size){
-    bar.hidden = false;
-    document.getElementById('memoBarText').textContent = `เลือกไว้ ${memoSelect.size} เคสที่ปิดแล้ว`;
-  } else bar.hidden = true;
+  const sel = [...boardSelect].map(id => CACHE.find(x => x.c.id === id)).filter(Boolean);
+  if(!sel.length){ bar.hidden = true; return; }
+  bar.hidden = false;
+  const openSel = sel.filter(x => x.m.status === 'OPEN');
+  const closedSel = sel.filter(x => x.m.status === 'CLOSED' && !x.m.memoNo);
+  const parts = [];
+  if(openSel.length) parts.push(`${openSel.length} เคสยังเปิดอยู่`);
+  if(closedSel.length) parts.push(`${closedSel.length} เคสปิดแล้ว รอ Memo`);
+  document.getElementById('memoBarText').textContent = `เลือกไว้ ${sel.length} เคส — ${parts.join(' · ')}`;
+  document.getElementById('memoBarAccept').hidden = !openSel.length;
+  document.getElementById('memoBarGo').hidden = !closedSel.length;
+}
+/* ทำเครื่องหมายซับรับเคลมทีเดียวหลายเคส — ใช้ซับที่ระบบรู้อยู่แล้วของแต่ละเคส (จากไทม์ไลน์เดิม)
+   เคสที่ยังไม่รู้ว่าซับไหนถืออยู่จะข้ามไปก่อน เพราะต้องระบุซับตอนบันทึกเสมอ */
+async function bulkAccept(){
+  const sel = [...boardSelect].map(id => CACHE.find(x => x.c.id === id)).filter(Boolean)
+    .filter(x => x.m.status === 'OPEN');
+  if(!sel.length) return;
+  const withVendor = sel.filter(x => x.m.vendor);
+  const noVendor = sel.filter(x => !x.m.vendor);
+  if(!withVendor.length){ toast('เคสที่เลือกยังไม่รู้ว่าซับไหนถืออยู่ ต้องระบุซับก่อนถึงจะทำเครื่องหมายรับเคลมได้'); return; }
+  if(noVendor.length && !confirm(`มี ${noVendor.length} เคสที่ยังไม่รู้ว่าซับไหนถืออยู่ จะข้ามไปก่อน\n\nทำเครื่องหมายรับเคลมให้ ${withVendor.length} เคสที่เหลือ ต่อไหม?`)) return;
+  const at = isoLocal(NOW());
+  for(const {c,m} of withVendor)
+    await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  toast(`ทำเครื่องหมายซับรับเคลมแล้ว ${withVendor.length} เคส${noVendor.length?` · ข้าม ${noVendor.length} เคส (ไม่รู้ซับ)`:''}`);
 }
 
 function renderTable(){
@@ -101,15 +124,15 @@ function renderTable(){
   });
   /* เคสที่หลุดจากรายการที่เห็น (เปลี่ยนตัวกรอง) ให้ถอดออกจากที่เลือกไว้ด้วย กันเลือกเคสที่มองไม่เห็นค้างอยู่ */
   const shown = new Set(list.map(x => x.c.id));
-  for(const id of [...memoSelect]) if(!shown.has(id)) memoSelect.delete(id);
+  for(const id of [...boardSelect]) if(!shown.has(id)) boardSelect.delete(id);
   renderMemoBar();
 
   document.getElementById('count').textContent = `แสดง ${list.length} จาก ${CACHE.length} เคส`;
   const tb = document.getElementById('rows');
   if(!list.length){ tb.innerHTML = '<tr><td colspan="8" class="empty">ไม่พบเคสตามเงื่อนไขที่เลือก</td></tr>'; return; }
   tb.innerHTML = list.map(({c,m,bu}) => `<tr data-id="${esc(c.id)}">
-    <td onclick="event.stopPropagation()">${m.status === 'CLOSED' && !m.memoNo
-      ? `<input type="checkbox" class="memoPick" data-id="${esc(c.id)}" ${memoSelect.has(c.id)?'checked':''}>` : ''}</td>
+    <td onclick="event.stopPropagation()">${m.status === 'OPEN' || (m.status === 'CLOSED' && !m.memoNo)
+      ? `<input type="checkbox" class="memoPick" data-id="${esc(c.id)}" ${boardSelect.has(c.id)?'checked':''}>` : ''}</td>
     <td class="id">${esc(c.id)}<span class="sub">${c.carrier} · ${esc(bu)}</span></td>
     <td>${m.vendor ? esc(m.vendor) : '<span style="color:var(--faint)">—</span>'}${m.flags.length?'<span class="flagdot" title="ข้อมูลน่าสงสัย"></span>':''}</td>
     <td>${esc(c.store_name || c.store || '—')}<span class="sub">${esc(c.truck||'')} ${esc(c.driver||'')}</span></td>
@@ -119,7 +142,7 @@ function renderTable(){
     <td>${statusChip(m)}</td></tr>`).join('');
   tb.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openCase(tr.dataset.id));
   tb.querySelectorAll('.memoPick').forEach(cb => cb.onchange = () => {
-    if(cb.checked) memoSelect.add(cb.dataset.id); else memoSelect.delete(cb.dataset.id);
+    if(cb.checked) boardSelect.add(cb.dataset.id); else boardSelect.delete(cb.dataset.id);
     renderMemoBar();
   });
 }
@@ -127,8 +150,9 @@ function renderTable(){
 /* ---------- ใส่เลข Memo ---------- */
 /* เพิ่มครั้งแรก — ไม่ใช่การแก้ไข จึงไม่ต้องยืนยันซ้ำหรือใส่เหตุผล */
 function openMemoAssign(){
-  if(!memoSelect.size) return;
-  document.getElementById('pTitle').textContent = `ใส่เลข Memo ให้ ${memoSelect.size} เคสที่เลือก`;
+  const ids = [...boardSelect].filter(id => { const x = CACHE.find(x => x.c.id === id); return x && x.m.status === 'CLOSED' && !x.m.memoNo; });
+  if(!ids.length) return;
+  document.getElementById('pTitle').textContent = `ใส่เลข Memo ให้ ${ids.length} เคสที่เลือก`;
   document.getElementById('pBody').innerHTML = `
     <form id="memoForm" novalidate>
       <div class="fld"><label for="memoNo">เลขที่ Memo</label>
@@ -140,10 +164,9 @@ function openMemoAssign(){
     ev.preventDefault();
     const no = document.getElementById('memoNo').value.trim();
     if(!no) return;
-    const ids = [...memoSelect];
     for(const id of ids)
       await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
-    memoSelect.clear();
+    boardSelect.clear();
     document.getElementById('pdlg').close();
     render();
     toast(`ใส่เลข Memo ${no} ให้ ${ids.length} เคสแล้ว`);
@@ -202,10 +225,19 @@ function openMemoFix(id, oldNo){
 /* ---------- คิวต้องส่งวันนี้ ---------- */
 function renderQueue(){
   const el = document.getElementById('queue');
+  const q = F.q.trim().toLowerCase();
+  /* คิวเป็นเซตย่อยของ "ยังไม่ปิด + ใกล้/เกินกำหนด" อยู่แล้ว แต่ต้องกรองซ้ำด้วยตัวกรองแถบด้านบนทุกตัว
+     (สถานะ/ขนส่ง/BU/ซับ/คำค้น) เหมือนหน้ากระดาน ไม่งั้นแถบตัวกรองที่โชว์อยู่จะกดแล้วไม่มีผลอะไรเลย */
   const todo = CACHE.filter(({m}) => m.status === 'OPEN' && (m.sla === 'BREACH' || m.sla === 'AT_RISK' || m.needsAction))
     .filter(({c,m,bu}) => vendorPass(m)
                        && (F.carrier === 'all' || c.carrier === F.carrier)
-                       && (F.bu === 'all' || bu === F.bu));
+                       && (F.bu === 'all' || bu === F.bu)
+                       && (F.status === 'all' || F.status === 'open'
+                           || (F.status === 'breach' && m.sla === 'BREACH')
+                           || (F.status === 'flag' && m.flags.length))
+                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason]
+                             .join(' ').toLowerCase().includes(q)));
+  document.getElementById('count').textContent = `${todo.length} เคสในคิว`;
   const unknownPanel = renderUnknownPanel();
   if(!todo.length){
     el.innerHTML = unknownPanel
@@ -268,7 +300,8 @@ function openCase(id){
     ${m.flags.map(f => `<div class="warnbox"><b>ตรวจสอบ:</b> ${esc(f.t)}</div>`).join('')}
     <div class="grid2">
       <div class="kv"><div class="k">ซับที่ถือเคสอยู่</div><div class="v">${esc(m.vendor||'—')}</div></div>
-      <div class="kv"><div class="k">ยอดเคลม</div><div class="v">${c.amount?baht(c.amount):'—'} บาท</div></div>
+      <div class="kv"><div class="k">ยอดเคลม</div><div class="v">${c.amount?baht(c.amount):'—'} บาท
+        ${(c.ex_vat||c.vat) ? `<span class="hint" style="margin:2px 0 0;display:block">ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)}</span>` : ''}</div></div>
       <div class="kv"><div class="k">สาเหตุ</div><div class="v">${esc(c.reason||'—')}</div></div>
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
@@ -313,7 +346,8 @@ function openCase(id){
             <select id="fVendor"><option value="">— ไม่ระบุ —</option>${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
         </div>
         <div class="frow"><div class="fld"><label for="fNote">หมายเหตุ (พิมพ์อิสระ)</label>
-          <textarea id="fNote" placeholder="เช่น โทรตามแล้ว ซับขอตรวจกับหน้างานก่อน / แนบใบนำออกแล้ว"></textarea></div></div>
+          <textarea id="fNote" placeholder="เช่น โทรตามแล้ว ซับขอตรวจกับหน้างานก่อน / แนบใบนำออกแล้ว"></textarea>
+          <div id="fReasonPick" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px" hidden></div></div></div>
         <div class="actions"><button type="submit" class="pri">บันทึก</button>
           <span class="hint" style="margin:0">เวลาที่กรอกคือเวลาที่เกิดเหตุการณ์จริง ระบบเก็บเวลาที่กดบันทึกแยกไว้ให้เอง</span></div>
       </form>
@@ -329,6 +363,23 @@ function openCase(id){
       </div>
       <div class="actions"><button type="submit">บันทึกเวลาใหม่</button>
         ${m.fixed?'<button type="button" id="xUndo" class="gh">ย้อนกลับเป็นค่าจากไฟล์</button>':''}</div></form>
+    </fieldset>
+
+    <fieldset><legend>แก้ไขยอดเคลม</legend>
+      <p class="hint">ยอดปัจจุบัน — ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)} = สุทธิ ${baht(c.amount)} บาท ·
+        ต้องระบุเหตุผลทุกครั้งที่แก้ เก็บไว้ในประวัติ ไม่ทับของเดิม</p>
+      <form id="fAmt" novalidate><div class="frow">
+        <div class="fld" style="max-width:150px"><label for="yEx">ยอดก่อน VAT</label>
+          <input type="text" id="yEx" inputmode="decimal" value="${c.ex_vat||''}"></div>
+        <div class="fld" style="max-width:120px"><label for="yVat">VAT</label>
+          <input type="text" id="yVat" inputmode="decimal" value="${c.vat||''}"></div>
+        <div class="fld" style="max-width:150px"><label for="yNet">ยอดสุทธิ (Net_amt)</label>
+          <input type="text" id="yNet" inputmode="decimal" value="${c.amount||''}"></div>
+        <div class="fld"><label for="yWhy">เหตุผลที่แก้ (บังคับกรอก)</label>
+          <input type="text" id="yWhy" required placeholder="เช่น ยอดในไฟล์สรุปตัวจริงไม่ตรงกับที่คีย์ไว้"></div>
+      </div>
+      <div class="actions"><button type="submit">บันทึกยอดใหม่</button>
+        <span class="hint" style="margin:0">กรอกยอดก่อน VAT + VAT แล้วปล่อยช่องยอดสุทธิว่าง ระบบรวมให้เอง หรือจะกรอกยอดสุทธิเองก็ได้</span></div></form>
     </fieldset>
 
     ${m.status === 'CLOSED' ? `<fieldset><legend>เลข Memo</legend>
@@ -354,15 +405,33 @@ function openCase(id){
   dlg.querySelector('.db').scrollTop = 0;
   renderEvidence(c.id);
 
+  /* เลือกประเภท "ซับ Reject" — โชว์ปุ่มสาเหตุที่ใช้บ่อยให้กดแปะลงช่องหมายเหตุแทนพิมพ์เอง */
+  const rejectReasons = [...REASONS, 'ผลิตภัณฑ์ไม่ได้คุณภาพ (แพ็คเกจจิ้ง)'];
+  function syncReasonPick(){
+    const sel = document.getElementById('fType'), box = document.getElementById('fReasonPick');
+    const show = sel.value === 'REJECT' || sel.value === 'REJECT_FINAL';
+    box.hidden = !show;
+    if(show && !box.childElementCount){
+      box.innerHTML = rejectReasons.map(r => `<button type="button" class="sm gh" data-reason="${esc(r)}">${esc(r)}</button>`).join('');
+      box.querySelectorAll('[data-reason]').forEach(b => b.onclick = () => {
+        document.getElementById('fNote').value = b.dataset.reason;
+        document.getElementById('fNote').focus();
+      });
+    }
+  }
   /* เลือก "ออกเลข Memo" ในลิสต์นี้ = ทางลัดเปิดป๊อปอัปใส่เลข Memo โดยตรง
      ไม่ผ่านฟอร์มบันทึกทั่วไป เพราะต้องบังคับกรอกเลขที่ (และเหตุผลถ้าเป็นการแก้ไข) */
   document.getElementById('fType').onchange = () => {
     const sel = document.getElementById('fType');
-    if(sel.value !== 'MEMO') return;
-    sel.value = 'RECEIVE';
-    if(m.status !== 'CLOSED'){ toast('ต้องปิดเคส (ซับรับเคลม หรือ ปิดงานเอง) ก่อน ถึงจะใส่เลข Memo ได้'); return; }
-    m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
+    if(sel.value === 'MEMO'){
+      sel.value = 'RECEIVE'; syncReasonPick();
+      if(m.status !== 'CLOSED'){ toast('ต้องปิดเคส (ซับรับเคลม หรือ ปิดงานเอง) ก่อน ถึงจะใส่เลข Memo ได้'); return; }
+      m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
+      return;
+    }
+    syncReasonPick();
   };
+  syncReasonPick();
   document.getElementById('fAdd').onsubmit = async ev => {
     ev.preventDefault();
     const type = document.getElementById('fType').value;
@@ -384,6 +453,23 @@ function openCase(id){
   };
   const un = document.getElementById('xUndo');
   if(un) un.onclick = async () => { await API.patchCase(c.id, {t0fix:null, t0why:''}); c.t0fix = null; render(); openCase(c.id); };
+  document.getElementById('fAmt').onsubmit = async ev => {
+    ev.preventDefault();
+    const ex = parseFloat(document.getElementById('yEx').value) || 0;
+    const vat = parseFloat(document.getElementById('yVat').value) || 0;
+    const netRaw = document.getElementById('yNet').value.trim();
+    const net = netRaw ? (parseFloat(netRaw) || 0) : Math.round((ex + vat) * 100) / 100;
+    const why = document.getElementById('yWhy').value.trim();
+    if(!why){ document.getElementById('yWhy').reportValidity(); return; }
+    if(ex === (c.ex_vat||0) && vat === (c.vat||0) && net === (c.amount||0)){ toast('ยอดเหมือนเดิม ไม่มีอะไรต้องแก้'); return; }
+    if(!confirm(`ยืนยันแก้ยอดเคลม ${c.id}\n\nจาก ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)} = สุทธิ ${baht(c.amount)}\nเป็น ก่อน VAT ${baht(ex)} + VAT ${baht(vat)} = สุทธิ ${baht(net)}\n\nเหตุผล: ${why}`)) return;
+    const at = isoLocal(NOW());
+    await addEvent(c.id, {at, type:'NOTE', vendor:null,
+      text:`แก้ยอดเคลม จาก ${baht(c.amount)} เป็น ${baht(net)} บาท (ก่อน VAT ${baht(ex)} + VAT ${baht(vat)}) — เหตุผล: ${why}`});
+    await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
+    c.amount = net; c.ex_vat = ex; c.vat = vat;
+    render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
   const dm = document.getElementById('dMemo');
   if(dm) dm.onclick = () => m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
