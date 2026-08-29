@@ -165,7 +165,10 @@ function renderReconcile(){
           ใช้จุดนี้ตรวจว่าที่คีย์รายวันไว้ครบกับไฟล์สรุปที่ขนส่งส่งมาไหม
           ถ้าเลขเคลมเดียวมีหลายบรรทัดสินค้า ระบบรวมเป็นเคสเดียวให้อัตโนมัติ (ยอดรวมกัน)
           แถวที่ไม่มีเลขเคลม (เช่น Reject claim / สาขายกเลิกเคลม) จะถูกข้ามไปเงียบ ๆ ไม่แสดงในตาราง
-          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ ยังไม่ระบุสาขา/ซับ (ไปเติมต่อได้ทีหลัง)</p>
+          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ ยังไม่ระบุสาขา/ซับ (ไปเติมต่อได้ทีหลัง)
+          <b>วางไฟล์เดิมซ้ำได้เสมอ</b> — เคสที่มีอยู่แล้วจะไม่ถูกนำเข้าซ้ำ แต่ถ้าเคสไหนสาขา/ทะเบียน/พขร. ยังว่างอยู่
+          (เช่น นำเข้าไว้ตั้งแต่ก่อนระบบอ่านคอลัมน์พวกนี้ได้) จะมีปุ่มให้เติมข้อมูลที่ขาดให้แยกต่างหาก
+          โดยไม่แตะฟิลด์ที่มีค่าอยู่แล้ว</p>
         <textarea class="paste" id="rcPaste" placeholder="วางตารางจาก Excel ตรงนี้ (Ctrl+V)"></textarea>
         <div class="actions" style="margin-top:10px">
           <label class="btn-file"><input type="file" id="rcFile" accept=".csv,text/csv,text/plain" hidden>
@@ -270,7 +273,21 @@ function parseReconcile(rows, cols){
     }
     out_.exVat = Math.round(out_.exVat*100)/100; out_.vat = Math.round(out_.vat*100)/100; out_.amt = Math.round(out_.amt*100)/100;
 
-    if(caseIdExists(out_.id)){ out_.status = 'skip'; out_.msg = 'มีเคสนี้ในระบบแล้ว — ข้ามไม่นำเข้าซ้ำ'; out.push(out_); continue; }
+    if(caseIdExists(out_.id)){
+      out_.status = 'skip'; out_.msg = 'มีเคสนี้ในระบบแล้ว — ข้ามไม่นำเข้าซ้ำ';
+      /* เคสมีอยู่แล้วแต่บางฟิลด์ยังว่าง (เช่น นำเข้าไว้ก่อนที่ระบบจะอ่านสาขา/ทะเบียนได้) — ถ้าไฟล์รอบนี้มีข้อมูล
+         ที่ระบบยังไม่มี เก็บไว้เป็นตัวเลือก "อัปเดตข้อมูลที่ขาด" ให้ ไม่แตะฟิลด์ที่มีค่าอยู่แล้วเด็ดขาด กันทับของเดิม */
+      const existing = String(out_.id).trim() in S.cases ? S.cases[String(out_.id).trim()]
+        : allCases().find(c => c.id.toUpperCase() === String(out_.id).trim().toUpperCase());
+      if(existing){
+        const fill = {};
+        if(!existing.store && out_.store) fill.store = out_.store;
+        if(!existing.truck && out_.truck) fill.truck = out_.truck;
+        if(!existing.driver && out_.driver) fill.driver = out_.driver;
+        if(Object.keys(fill).length){ out_.backfillId = existing.id; out_.backfill = fill; }
+      }
+      out.push(out_); continue;
+    }
 
     /* ไม่เจอยอดเงินเลย (Ex_vat/Vat/Net_amt ว่างหรือหาคอลัมน์ไม่เจอทั้งหมด) — เตือนไว้ก่อนนำเข้าเป็น 0 บาทเงียบ ๆ */
     if(!out_.amt) out_.status = 'warn', out_.msg = (out_.msg?out_.msg+' · ':'')+'ไม่พบยอดเงิน (Ex_vat/Vat/Net_amt) จะนำเข้าเป็น 0 บาท — ตรวจไฟล์หรือแก้ยอดทีหลัง';
@@ -413,6 +430,7 @@ function renderReconcileCompare(groups){
 function showReconcilePreview(){
   const good = rcRows.filter(r => r.status !== 'skip');
   const skip = rcRows.filter(r => r.status === 'skip');
+  const backfillable = rcRows.filter(r => r.backfill);
   document.getElementById('rcPreview').innerHTML = `
     <div class="tw" style="margin-top:14px"><table style="min-width:1240px"><thead><tr>
       <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th><th>พขร.</th><th>สาเหตุ</th>
@@ -431,16 +449,36 @@ function showReconcilePreview(){
         <td class="r">${r.exVat ? r.exVat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
         <td class="r">${r.vat ? r.vat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
         <td class="r">${r.amt ? r.amt.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
-        <td>${r.status === 'skip' ? `<span class="chip bad">ข้าม — ${esc(r.msg)}</span>`
+        <td>${r.status === 'skip' ? `<span class="chip bad">ข้าม — ${esc(r.msg)}</span>${r.backfill?' <span class="chip warn">เติมข้อมูลที่ขาดได้</span>':''}`
             : r.status === 'warn' ? `<span class="chip warn">${esc(r.msg)}</span>`
             : '<span class="chip ok">พร้อมนำเข้า</span>'}</td></tr>`).join('')}
     </tbody></table></div>
     ${rcRows.length > 300 ? `<p class="hint">แสดง 300 บรรทัดแรกจาก ${rcRows.length} — นำเข้าครบทุกบรรทัด</p>` : ''}
     <div class="actions" style="margin-top:12px">
       <button type="button" class="pri" id="rcApply" ${good.length?'':'disabled'}>นำเข้า ${good.length} เคส</button>
-      <span class="hint" style="margin:0">${skip.length} เคลมถูกข้าม (ซ้ำกับที่มีอยู่แล้ว)</span></div>`;
+      ${backfillable.length ? `<button type="button" id="rcBackfill">เติมสาขา/ทะเบียน/พขร. ที่ขาดให้เคสเดิม (${backfillable.length} เคส)</button>` : ''}
+      <span class="hint" style="margin:0">${skip.length} เคลมถูกข้าม (ซ้ำกับที่มีอยู่แล้ว)${backfillable.length?` · ${backfillable.length} เคสในนั้นเติมข้อมูลที่ขาดได้`:''}</span></div>`;
   const ap = document.getElementById('rcApply');
   if(ap) ap.onclick = applyReconcileImport;
+  const bf = document.getElementById('rcBackfill');
+  if(bf) bf.onclick = applyBackfill;
+}
+
+/* ---------- เติมสาขา/ทะเบียน/พขร. ที่ขาดให้เคสที่มีอยู่แล้ว — ไม่แตะฟิลด์ที่มีค่าอยู่แล้ว
+   ใช้ตอนนำเข้าไปแล้วก่อนที่ระบบจะอ่านคอลัมน์เหล่านี้ได้ (เช่น deploy รุ่นเก่า) แล้วอยากอัปเดตให้ครบทีหลัง ---------- */
+async function applyBackfill(){
+  const rows = rcRows.filter(r => r.backfill);
+  if(!rows.length) return;
+  let updated = 0, failed = 0;
+  for(const r of rows){
+    try{
+      const j = await API.patchCase(r.backfillId, r.backfill);
+      S.cases[r.backfillId] = j.case;
+      updated++;
+    }catch(e){ failed++; }
+  }
+  render();
+  toast(`เติมข้อมูลที่ขาดแล้ว ${updated} เคส${failed ? ` · ${failed} รายการไม่สำเร็จ` : ''}`);
 }
 
 async function applyReconcileImport(){
