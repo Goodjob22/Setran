@@ -225,10 +225,19 @@ function openMemoFix(id, oldNo){
 /* ---------- คิวต้องส่งวันนี้ ---------- */
 function renderQueue(){
   const el = document.getElementById('queue');
+  const q = F.q.trim().toLowerCase();
+  /* คิวเป็นเซตย่อยของ "ยังไม่ปิด + ใกล้/เกินกำหนด" อยู่แล้ว แต่ต้องกรองซ้ำด้วยตัวกรองแถบด้านบนทุกตัว
+     (สถานะ/ขนส่ง/BU/ซับ/คำค้น) เหมือนหน้ากระดาน ไม่งั้นแถบตัวกรองที่โชว์อยู่จะกดแล้วไม่มีผลอะไรเลย */
   const todo = CACHE.filter(({m}) => m.status === 'OPEN' && (m.sla === 'BREACH' || m.sla === 'AT_RISK' || m.needsAction))
     .filter(({c,m,bu}) => vendorPass(m)
                        && (F.carrier === 'all' || c.carrier === F.carrier)
-                       && (F.bu === 'all' || bu === F.bu));
+                       && (F.bu === 'all' || bu === F.bu)
+                       && (F.status === 'all' || F.status === 'open'
+                           || (F.status === 'breach' && m.sla === 'BREACH')
+                           || (F.status === 'flag' && m.flags.length))
+                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason]
+                             .join(' ').toLowerCase().includes(q)));
+  document.getElementById('count').textContent = `${todo.length} เคสในคิว`;
   const unknownPanel = renderUnknownPanel();
   if(!todo.length){
     el.innerHTML = unknownPanel

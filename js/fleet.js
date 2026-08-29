@@ -179,6 +179,7 @@ function renderFleet(){
                  : t.state === 'REJECTED_ONLY' ? 2 : t.state === 'UNKNOWN' ? 3 : 4;
     return r(a) - r(b) || b.cases.length - a.cases.length;
   });
+  document.getElementById('count').textContent = `${list.length} ทะเบียน`;
 
   const byBU = {};
   for(const t of all){ const b = t.bu || '—'; (byBU[b] ||= {n:0, pri:0}); byBU[b].n++; if(t.primary) byBU[b].pri++; }

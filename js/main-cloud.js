@@ -14,10 +14,17 @@ function render(){
   document.getElementById('vsec').hidden = !isCase;
   document.getElementById('alert').hidden = !isCase;
   document.getElementById('filterBar').hidden = !isCase && F.view !== 'fleet';
+  /* สถานะ (ยังไม่ปิด/เกิน 48 ชม./ปิดแล้ว/ข้อมูลน่าสงสัย) มีความหมายเฉพาะหน้ากระดาน/คิว — หน้า Memo มีตัวกรอง
+     "ขอบเขต" ของตัวเองอยู่แล้ว (เคสค้าง/เคสสำเร็จ) ส่วนหน้าทะเบียนรถไม่มีสถานะเคสรายทะเบียน จึงซ่อนแถบนี้ไว้
+     กันสับสนว่ากดแล้วทำไมไม่มีผล */
+  document.getElementById('statusSeg').hidden = (F.view === 'memo' || F.view === 'fleet');
   document.querySelectorAll('#statusSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.st === F.status));
   document.querySelectorAll('#carrierSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.cr === F.carrier));
 
   const buSeg = document.getElementById('buSeg');
+  /* หน้าทะเบียนรถมีตัวกรอง BU ของตัวเองอยู่แล้ว (#fleetBUSeg ผูกกับ fleetBU) ซ่อนอันนี้กันมีสองปุ่ม BU
+     ซ้อนกันบนจอเดียว ซึ่งปุ่มนี้จะไม่มีผลอะไรกับรายการทะเบียนที่เห็นเลย */
+  buSeg.hidden = (F.view === 'fleet');
   const bus = buList();
   buSeg.innerHTML = `<button data-bu="all" aria-pressed="${F.bu==='all'}">ทุก BU</button>` +
     bus.map(b => `<button data-bu="${esc(b)}" aria-pressed="${F.bu===b}">${esc(b)}</button>`).join('');
