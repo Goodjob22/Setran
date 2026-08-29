@@ -83,15 +83,38 @@ function statusChip(m){
        : '<span class="chip ok">อยู่ในกรอบ</span>';
 }
 
-/* เคสที่เลือกไว้เพื่อออกเลข Memo พร้อมกันหลายเคส — เลือกได้เฉพาะเคสที่ปิดแล้วและยังไม่มีเลข Memo
-   (เคสที่มีเลข Memo อยู่แล้วต้องแก้ทีละเคสจากหน้ารายละเอียด เพราะแต่ละเคสมีเลขเดิมต่างกัน) */
-let memoSelect = new Set();
+/* เคสที่เลือกไว้เพื่อทำงานหลายเคสพร้อมกัน — เลือกได้ทั้งเคสที่ยังเปิดอยู่ (เพื่อทำเครื่องหมายซับรับเคลม
+   ทีเดียวหลายเคส) และเคสที่ปิดแล้วแต่ยังไม่มีเลข Memo (เพื่อใส่เลข Memo เดียวกันให้หลายเคส) — เคสที่มีเลข
+   Memo อยู่แล้วต้องแก้ทีละเคสจากหน้ารายละเอียด เพราะแต่ละเคสมีเลขเดิมต่างกัน จึงไม่มีให้เลือกตรงนี้ */
+let boardSelect = new Set();
 function renderMemoBar(){
   const bar = document.getElementById('memoBar');
-  if(memoSelect.size){
-    bar.hidden = false;
-    document.getElementById('memoBarText').textContent = `เลือกไว้ ${memoSelect.size} เคสที่ปิดแล้ว`;
-  } else bar.hidden = true;
+  const sel = [...boardSelect].map(id => CACHE.find(x => x.c.id === id)).filter(Boolean);
+  if(!sel.length){ bar.hidden = true; return; }
+  bar.hidden = false;
+  const openSel = sel.filter(x => x.m.status === 'OPEN');
+  const closedSel = sel.filter(x => x.m.status === 'CLOSED' && !x.m.memoNo);
+  const parts = [];
+  if(openSel.length) parts.push(`${openSel.length} เคสยังเปิดอยู่`);
+  if(closedSel.length) parts.push(`${closedSel.length} เคสปิดแล้ว รอ Memo`);
+  document.getElementById('memoBarText').textContent = `เลือกไว้ ${sel.length} เคส — ${parts.join(' · ')}`;
+  document.getElementById('memoBarAccept').hidden = !openSel.length;
+  document.getElementById('memoBarGo').hidden = !closedSel.length;
+}
+/* ทำเครื่องหมายซับรับเคลมทีเดียวหลายเคส — ใช้ซับที่ระบบรู้อยู่แล้วของแต่ละเคส (จากไทม์ไลน์เดิม)
+   เคสที่ยังไม่รู้ว่าซับไหนถืออยู่จะข้ามไปก่อน เพราะต้องระบุซับตอนบันทึกเสมอ */
+async function bulkAccept(){
+  const sel = [...boardSelect].map(id => CACHE.find(x => x.c.id === id)).filter(Boolean)
+    .filter(x => x.m.status === 'OPEN');
+  if(!sel.length) return;
+  const withVendor = sel.filter(x => x.m.vendor);
+  const noVendor = sel.filter(x => !x.m.vendor);
+  if(!withVendor.length){ toast('เคสที่เลือกยังไม่รู้ว่าซับไหนถืออยู่ ต้องระบุซับก่อนถึงจะทำเครื่องหมายรับเคลมได้'); return; }
+  if(noVendor.length && !confirm(`มี ${noVendor.length} เคสที่ยังไม่รู้ว่าซับไหนถืออยู่ จะข้ามไปก่อน\n\nทำเครื่องหมายรับเคลมให้ ${withVendor.length} เคสที่เหลือ ต่อไหม?`)) return;
+  const at = isoLocal(NOW());
+  for(const {c,m} of withVendor)
+    await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  toast(`ทำเครื่องหมายซับรับเคลมแล้ว ${withVendor.length} เคส${noVendor.length?` · ข้าม ${noVendor.length} เคส (ไม่รู้ซับ)`:''}`);
 }
 
 function renderTable(){
@@ -101,15 +124,15 @@ function renderTable(){
   });
   /* เคสที่หลุดจากรายการที่เห็น (เปลี่ยนตัวกรอง) ให้ถอดออกจากที่เลือกไว้ด้วย กันเลือกเคสที่มองไม่เห็นค้างอยู่ */
   const shown = new Set(list.map(x => x.c.id));
-  for(const id of [...memoSelect]) if(!shown.has(id)) memoSelect.delete(id);
+  for(const id of [...boardSelect]) if(!shown.has(id)) boardSelect.delete(id);
   renderMemoBar();
 
   document.getElementById('count').textContent = `แสดง ${list.length} จาก ${CACHE.length} เคส`;
   const tb = document.getElementById('rows');
   if(!list.length){ tb.innerHTML = '<tr><td colspan="8" class="empty">ไม่พบเคสตามเงื่อนไขที่เลือก</td></tr>'; return; }
   tb.innerHTML = list.map(({c,m,bu}) => `<tr data-id="${esc(c.id)}">
-    <td onclick="event.stopPropagation()">${m.status === 'CLOSED' && !m.memoNo
-      ? `<input type="checkbox" class="memoPick" data-id="${esc(c.id)}" ${memoSelect.has(c.id)?'checked':''}>` : ''}</td>
+    <td onclick="event.stopPropagation()">${m.status === 'OPEN' || (m.status === 'CLOSED' && !m.memoNo)
+      ? `<input type="checkbox" class="memoPick" data-id="${esc(c.id)}" ${boardSelect.has(c.id)?'checked':''}>` : ''}</td>
     <td class="id">${esc(c.id)}<span class="sub">${c.carrier} · ${esc(bu)}</span></td>
     <td>${m.vendor ? esc(m.vendor) : '<span style="color:var(--faint)">—</span>'}${m.flags.length?'<span class="flagdot" title="ข้อมูลน่าสงสัย"></span>':''}</td>
     <td>${esc(c.store_name || c.store || '—')}<span class="sub">${esc(c.truck||'')} ${esc(c.driver||'')}</span></td>
@@ -119,7 +142,7 @@ function renderTable(){
     <td>${statusChip(m)}</td></tr>`).join('');
   tb.querySelectorAll('tr[data-id]').forEach(tr => tr.onclick = () => openCase(tr.dataset.id));
   tb.querySelectorAll('.memoPick').forEach(cb => cb.onchange = () => {
-    if(cb.checked) memoSelect.add(cb.dataset.id); else memoSelect.delete(cb.dataset.id);
+    if(cb.checked) boardSelect.add(cb.dataset.id); else boardSelect.delete(cb.dataset.id);
     renderMemoBar();
   });
 }
@@ -127,8 +150,9 @@ function renderTable(){
 /* ---------- ใส่เลข Memo ---------- */
 /* เพิ่มครั้งแรก — ไม่ใช่การแก้ไข จึงไม่ต้องยืนยันซ้ำหรือใส่เหตุผล */
 function openMemoAssign(){
-  if(!memoSelect.size) return;
-  document.getElementById('pTitle').textContent = `ใส่เลข Memo ให้ ${memoSelect.size} เคสที่เลือก`;
+  const ids = [...boardSelect].filter(id => { const x = CACHE.find(x => x.c.id === id); return x && x.m.status === 'CLOSED' && !x.m.memoNo; });
+  if(!ids.length) return;
+  document.getElementById('pTitle').textContent = `ใส่เลข Memo ให้ ${ids.length} เคสที่เลือก`;
   document.getElementById('pBody').innerHTML = `
     <form id="memoForm" novalidate>
       <div class="fld"><label for="memoNo">เลขที่ Memo</label>
@@ -140,10 +164,9 @@ function openMemoAssign(){
     ev.preventDefault();
     const no = document.getElementById('memoNo').value.trim();
     if(!no) return;
-    const ids = [...memoSelect];
     for(const id of ids)
       await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
-    memoSelect.clear();
+    boardSelect.clear();
     document.getElementById('pdlg').close();
     render();
     toast(`ใส่เลข Memo ${no} ให้ ${ids.length} เคสแล้ว`);

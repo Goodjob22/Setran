@@ -58,8 +58,9 @@ document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e =
 addEventListener('resize', syncTop);
 
 document.getElementById('btnMailAll').onclick = () => openMail();
+document.getElementById('memoBarAccept').onclick = () => bulkAccept();
 document.getElementById('memoBarGo').onclick = () => openMemoAssign();
-document.getElementById('memoBarClear').onclick = () => { memoSelect.clear(); render(); };
+document.getElementById('memoBarClear').onclick = () => { boardSelect.clear(); render(); };
 document.getElementById('btnExportCase').onclick = () => {
   const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ชื่อสาขา','ทะเบียน','พขร.','ซับปัจจุบัน','ยอดก่อน VAT','VAT','ยอด','สาเหตุ',
     'รับเมล','ครบกำหนด','ปิดเมื่อ','ใช้เวลา(ชม.)','ซับถือเคส(ชม.)','ค้างฝั่งเรา(ชม.)','สถานะ','SLA','ธงตรวจสอบ']];

@@ -74,6 +74,7 @@ const RC_ALIASES = {
   code:    ['item no', 'itemno', 'รหัส'],
   name:    ['art_desc', 'artdesc', 'ชื่อสินค้า'],
   note:    ['note21', 'หมายเหตุ', 'note'],
+  mktransport: ['mk transport'],
 };
 function detectColumns(headerRow){
   const cells = headerRow.map(s => String(s || '').trim().toLowerCase());
@@ -158,7 +159,8 @@ function renderReconcile(){
         </div>
         <div id="rcPreview"></div>
       </div>
-    </div>`;
+    </div>
+    <div id="rcCompare"></div>`;
 
   document.getElementById('rcPrev').onclick = () => { RC.periodKey = shiftPeriod(RC.periodKey, -1); render(); };
   document.getElementById('rcNext').onclick = () => { RC.periodKey = shiftPeriod(RC.periodKey, 1); render(); };
@@ -176,7 +178,7 @@ function renderReconcile(){
     r.readAsText(f, 'utf-8');
   };
   document.getElementById('rcCheck').onclick = checkReconcileImport;
-  if(rcRows) showReconcilePreview();
+  if(rcRows){ showReconcilePreview(); renderReconcileCompare(buildReconcileCompare(R)); }
 }
 
 /* ---------- ตรวจข้อมูลก่อนนำเข้า ---------- */
@@ -196,6 +198,7 @@ function checkReconcileImport(){
   }
   rcRows = parseReconcile(raw.slice(headerRowIdx + 1), cols);
   showReconcilePreview();
+  renderReconcileCompare(buildReconcileCompare(pendingReportData()));
 }
 
 function parseReconcile(rows, cols){
@@ -219,6 +222,7 @@ function parseReconcile(rows, cols){
     const first = f => { for(const r of grp){ const v = get(r, f); if(String(v||'').trim()) return String(v).trim(); } return ''; };
     const out_ = {n, id, carrier:first('carrier').toUpperCase(), atRaw:first('at'), atIso:'',
       store:first('store'), truck:first('truck'), driver:first('driver'), reason:first('reason'),
+      mkTransport:first('mktransport'),
       note:[...new Set(grp.map(r => String(get(r,'note')||'').trim()).filter(Boolean))].join(' // '),
       exVat:0, vat:0, amt:0, items:[], status:'ok', msg:''};
 
@@ -251,6 +255,104 @@ function parseReconcile(rows, cols){
     out.push(out_);
   }
   return out;
+}
+
+/* ---------- หาว่าซับไหนน่าจะถือเคลมนี้ — เทียบกับรายชื่อ/รหัส/ชื่อเรียกอื่นของซับที่มีอยู่จริงในระบบ ---------- */
+function vendorCandidates(){
+  return Object.entries(S.vendors || {}).map(([code, v]) => ({
+    code, needles: [code, v.display, ...(v.aliases||[])].filter(Boolean).map(s => String(s).trim().toLowerCase())
+  })).filter(v => v.needles.length);
+}
+const matchVendorExact = (text, cand) => {
+  const t = String(text||'').trim().toLowerCase();
+  if(!t) return null;
+  const hit = cand.find(v => v.needles.includes(t));
+  return hit ? hit.code : null;
+};
+const matchVendorInText = (text, cand) => {
+  const t = String(text||'').toLowerCase();
+  if(!t) return null;
+  const hit = cand.find(v => v.needles.some(n => n.length >= 3 && t.includes(n)));
+  return hit ? hit.code : null;
+};
+
+/* ---------- ตรวจสอบยอดตรงกัน — เทียบเคลมในรอบ Period นี้ ระหว่างที่มีในระบบกับที่มีในไฟล์ที่เพิ่งตรวจ
+   จัดกลุ่มตามซับ (เอาซับจากระบบก่อนถ้ารู้อยู่แล้ว ไม่งั้นลองเดาจากคอลัมน์ MK Transport และคำในหมายเหตุ) ---------- */
+function buildReconcileCompare(R){
+  if(!rcRows) return [];
+  const sysById = new Map();
+  for(const x of R.list) sysById.set(x.c.id.toUpperCase(), x);
+  const fileById = new Map();
+  for(const r of rcRows) fileById.set(r.id.toUpperCase(), r);
+  const cand = vendorCandidates();
+
+  const rows = [];
+  for(const key of new Set([...sysById.keys(), ...fileById.keys()])){
+    const sys = sysById.get(key), file = fileById.get(key);
+    const sysAmt = sys ? (sys.c.amount||0) : null;
+    const fileAmt = file ? file.amt : null;
+    const cmp = sys && file ? (Math.abs(sysAmt - fileAmt) < 0.01 ? 'match' : 'mismatch')
+      : sys ? 'sysonly' : 'fileonly';
+
+    let vendor = sys ? sys.m.vendor : null, vendorSrc = vendor ? 'ระบบ' : '';
+    if(!vendor && file){
+      const byMk = file.mkTransport ? matchVendorExact(file.mkTransport, cand) : null;
+      const byNote = matchVendorInText(file.note, cand);
+      if(byMk && byNote && byMk !== byNote){ vendor = byMk; vendorSrc = `MK Transport (หมายเหตุกลับชี้ ${esc(byNote)})`; }
+      else if(byMk){ vendor = byMk; vendorSrc = 'MK Transport'; }
+      else if(byNote){ vendor = byNote; vendorSrc = 'เดาจากหมายเหตุ'; }
+    }
+    rows.push({id: sys ? sys.c.id : file.id, vendor, vendorSrc, cmp, sysAmt, fileAmt});
+  }
+
+  const groups = new Map();
+  for(const row of rows){
+    const key = row.vendor || NOVENDOR;
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.entries()]
+    .sort((a,b) => a[0] === NOVENDOR ? 1 : b[0] === NOVENDOR ? -1 : a[0].localeCompare(b[0], 'th'))
+    .map(([vendor, items]) => ({
+      vendor, items: items.sort((a,b) => a.id.localeCompare(b.id)),
+      sysTotal: items.reduce((s,x) => s+(x.sysAmt||0), 0),
+      fileTotal: items.reduce((s,x) => s+(x.fileAmt||0), 0),
+    }));
+}
+
+function renderReconcileCompare(groups){
+  const box = document.getElementById('rcCompare');
+  if(!box) return;
+  if(!groups.length){ box.innerHTML = ''; return; }
+  const fmtAmt = v => v == null ? '—' : v.toLocaleString('th-TH', {minimumFractionDigits:2});
+  const cmpChip = c => c === 'match' ? '<span class="chip ok">ตรงกัน</span>'
+    : c === 'mismatch' ? '<span class="chip bad">ไม่ตรงกัน</span>'
+    : c === 'sysonly' ? '<span class="chip warn">มีแต่ในระบบ</span>'
+    : '<span class="chip n">มีแต่ในไฟล์</span>';
+  const nMismatch = groups.reduce((s,g) => s+g.items.filter(x=>x.cmp==='mismatch').length, 0);
+  const nSysOnly  = groups.reduce((s,g) => s+g.items.filter(x=>x.cmp==='sysonly').length, 0);
+  const nFileOnly = groups.reduce((s,g) => s+g.items.filter(x=>x.cmp==='fileonly').length, 0);
+
+  box.innerHTML = `
+    <div class="panel">
+      <div class="phead"><h3>ตรวจสอบยอดตรงกัน — เรียงตามซับ</h3>
+        <span class="sp hint" style="margin:0">ไม่ตรงกัน ${nMismatch} · มีแต่ในระบบ ${nSysOnly} · มีแต่ในไฟล์ ${nFileOnly}</span></div>
+      <div class="pbody" style="padding:0">
+        ${groups.map(g => `
+          <div class="tw" style="border-top:1px solid var(--rule)"><table style="min-width:760px"><thead>
+            <tr><th colspan="5"><b>${esc(g.vendor)}</b> — ${g.items.length} เคลม ·
+              ยอดระบบ ${fmtAmt(g.sysTotal)} บาท · ยอดไฟล์ ${fmtAmt(g.fileTotal)} บาท</th></tr>
+            <tr><th>เลขเคลม</th><th style="text-align:right">ยอดในระบบ</th><th style="text-align:right">ยอดในไฟล์</th>
+              <th>ที่มาซับ</th><th>ผลตรวจ</th></tr></thead>
+            <tbody>${g.items.map(x => `<tr style="cursor:default">
+              <td class="mono">${esc(x.id)}</td>
+              <td class="r">${fmtAmt(x.sysAmt)}</td>
+              <td class="r">${fmtAmt(x.fileAmt)}</td>
+              <td style="font-size:12px">${x.vendorSrc || ''}</td>
+              <td>${cmpChip(x.cmp)}</td></tr>`).join('')}
+            </tbody></table></div>`).join('')}
+      </div>
+    </div>`;
 }
 
 function showReconcilePreview(){
