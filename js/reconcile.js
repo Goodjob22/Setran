@@ -2,8 +2,9 @@
    reconcile.js — นำเข้าไฟล์สรุป Period (16–15) มาเทียบกับที่คีย์รายวัน
    ------------------------------------------------------------
    ทำไมต้องมี: เคสถูกคีย์เข้าระบบทุกวันอยู่แล้วที่หน้า "คีย์งานเข้า"
-   แต่ขนส่งส่งไฟล์สรุปมาอีกทีเป็นรอบ ไฟล์นี้ใช้ไล่เทียบว่าตรงกันไหม
-   เลขเคลมที่มีอยู่แล้วในระบบจะถูกข้ามอัตโนมัติ ไม่นำเข้าซ้ำ
+   แต่ขนส่งส่งไฟล์สรุปมาอีกทีเป็นรอบ (ทุก 10/20/30 วัน) ไฟล์นี้ใช้ไล่เทียบว่าตรงกันไหม
+   เลขเคลมที่มีอยู่แล้วในระบบจะถูกข้ามอัตโนมัติ ไม่นำเข้าซ้ำ — จับคู่ด้วยคอลัมน์
+   Claim_ID (Final) ของไฟล์จริง (หรือ "เลขเคลม" ถ้าวางแบบเทมเพลตง่าย)
 
    พีเรียด = วันที่ 16 ของเดือนหนึ่ง ถึงวันที่ 15 ของเดือนถัดไป (เก็บแบบไม่รวมวันที่ 16 ถัดไป)
    ใช้ตัดรอบรายงาน ไม่ใช่ตัดรอบว่าไฟล์มาถึงวันไหน — คำนวณจากวันที่รับเมลของแต่ละเคส (m.t0)
@@ -43,6 +44,54 @@ function parseFlexibleDate(s){
   if(m){ let yy = +m[3]; if(yy > 2400) yy -= 543; return new Date(yy, +m[2]-1, +m[1], 8, 0); }
   return null;
 }
+
+/* ---------- อ่านตัวเลขแบบยืดหยุ่น — ไฟล์บัญชีมักมีลูกน้ำคั่นหลักพันและวงเล็บแทนติดลบ ---------- */
+function parseAmt(s){
+  if(s == null) return 0;
+  let t = String(s).trim();
+  if(!t) return 0;
+  let neg = false;
+  if(/^\(.*\)$/.test(t)){ neg = true; t = t.slice(1, -1); }
+  t = t.replace(/,/g, '').replace(/[^\d.\-]/g, '');
+  const n = parseFloat(t);
+  if(isNaN(n)) return 0;
+  return neg ? -Math.abs(n) : n;
+}
+
+/* ---------- หาคอลัมน์อัตโนมัติจากหัวตาราง — รองรับทั้งเทมเพลตง่าย และไฟล์สรุปจริงจากขนส่ง
+   (เช่น Claim_ID (Final), Ex_vat, Vat, Net_amt, Reason20, Deldate, Item No, Art_Desc, Note21) ---------- */
+const RC_ALIASES = {
+  id:      ['claim_id (final)', 'claim id (final)', 'เลขเคลม', 'claim id'],
+  carrier: ['ขนส่ง', 'carrier'],
+  at:      ['deldate', 'delivery date', 'วันที่รับเมล', 'วันที่'],
+  store:   ['สาขา', 'store'],
+  truck:   ['ทะเบียนรถ', 'ทะเบียน', 'truck no', 'truck'],
+  driver:  ['พขร.', 'พขร', 'truck driver', 'driver'],
+  reason:  ['reason20', 'สาเหตุ', 'reason'],
+  exvat:   ['ex_vat', 'exvat'],
+  vat:     ['vat'],
+  net:     ['net_amt', 'netamt', 'ยอด (บาท)', 'ยอด', 'amount'],
+  code:    ['item no', 'itemno', 'รหัส'],
+  name:    ['art_desc', 'artdesc', 'ชื่อสินค้า'],
+  note:    ['note21', 'หมายเหตุ', 'note'],
+};
+function detectColumns(headerRow){
+  const cells = headerRow.map(s => String(s || '').trim().toLowerCase());
+  const idx = {};
+  for(const [field, aliases] of Object.entries(RC_ALIASES)){
+    /* จับคู่แบบตรงเป๊ะเท่านั้น (ไม่ใช้ substring) — ไฟล์จริงมีคอลัมน์ข้อความอิสระหลายคอลัมน์
+       ที่บังเอิญมีคำอย่าง "สาขา" ปนอยู่ในชื่อหัวตาราง จับแบบ substring จะดึงคอลัมน์ผิดมาแทน
+       ไล่ตามลำดับความสำคัญของ alias (ชื่อเจาะจงสุดมาก่อน) เช่น "Reason20" ต้องมาก่อน "Reason" เฉย ๆ */
+    let found = -1;
+    for(const a of aliases){ found = cells.indexOf(a); if(found >= 0) break; }
+    idx[field] = found;
+  }
+  return idx;
+}
+/* เลขเคลมจริงต้องมีรูปแบบ "รหัส-..." (MKM-… / CLM-…) — แถวที่ไม่มีเลขเคลม
+   (เช่น "Reject claim", "สาขายกเลิกเคลม", "สาขาตัด DA ผิด") ไม่มี ID ให้จับคู่หรือสร้างเคสได้
+   ตามที่ตกลงกันไว้ว่าให้ข้ามไปเลยแบบเงียบ ๆ ไม่ต้องนับหรือแสดง */
+const looksLikeClaimId = s => /^[A-Za-z]{2,6}-/.test(String(s || '').trim());
 
 let RC = {periodKey: periodOf(NOW()).key};
 let rcRows = null;
@@ -90,15 +139,18 @@ function renderReconcile(){
 
     <div class="panel">
       <div class="phead"><h3>นำเข้าไฟล์สรุป Period</h3>
-        <span class="sp"><button type="button" class="sm" id="rcTemplate">โหลดไฟล์ตัวอย่าง</button></span></div>
+        <span class="sp"><button type="button" class="sm" id="rcTemplate">โหลดไฟล์ตัวอย่าง (เทมเพลตง่าย)</button></span></div>
       <div class="pbody">
-        <p class="hint">วางตารางจาก Excel (Ctrl+V) หรือเลือกไฟล์ CSV — ต้องมี 9 คอลัมน์เรียงตามนี้:
-          <b>เลขเคลม · ขนส่ง · วันที่รับเมล · สาขา · ทะเบียนรถ · พขร. · สาเหตุ · ยอด (บาท) · หมายเหตุ</b>
-          (แถวหัวตารางจะถูกข้ามให้เอง)</p>
+        <p class="hint">วางได้ทั้งสองแบบ: <b>(1)</b> คัดลอกทั้งชีตจากไฟล์สรุปจริงของขนส่ง (คอลัมน์
+          <span class="mono" style="font-size:12px">Claim_ID (Final) · Ex_vat · Vat · Net_amt · Reason20 · Deldate · Item No · Art_Desc · Note21</span>
+          ) มาวางได้เลย ระบบหาคอลัมน์ให้เอง ไม่ต้องเรียงคอลัมน์เอง หรือ <b>(2)</b> เทมเพลตง่าย 9 คอลัมน์เดิม
+          (เลขเคลม · ขนส่ง · วันที่รับเมล · สาขา · ทะเบียนรถ · พขร. · สาเหตุ · ยอด · หมายเหตุ)</p>
         <p class="hint"><b>เลขเคลมที่มีอยู่แล้วในระบบจะถูกข้ามอัตโนมัติ ไม่นำเข้าซ้ำ</b> —
           ใช้จุดนี้ตรวจว่าที่คีย์รายวันไว้ครบกับไฟล์สรุปที่ขนส่งส่งมาไหม
-          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ ยังไม่ระบุซับ (ไปตามต่อได้ที่คิวต้องส่งวันนี้)</p>
-        <textarea class="paste" id="rcPaste" placeholder="MKM-2569-08-00531&#9;DHL&#9;2026-08-05&#9;101&#9;71-4708&#9;จีรวัฒน์&#9;สินค้าส่งขาด&#9;1250.00&#9;"></textarea>
+          ถ้าเลขเคลมเดียวมีหลายบรรทัดสินค้า ระบบรวมเป็นเคสเดียวให้อัตโนมัติ (ยอดรวมกัน)
+          แถวที่ไม่มีเลขเคลม (เช่น Reject claim / สาขายกเลิกเคลม) จะถูกข้ามไปเงียบ ๆ ไม่แสดงในตาราง
+          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ ยังไม่ระบุสาขา/ซับ (ไปเติมต่อได้ทีหลัง)</p>
+        <textarea class="paste" id="rcPaste" placeholder="วางตารางจาก Excel ตรงนี้ (Ctrl+V)"></textarea>
         <div class="actions" style="margin-top:10px">
           <label class="btn-file"><input type="file" id="rcFile" accept=".csv,text/csv,text/plain" hidden>
             <button type="button" class="sm" id="rcPick">เลือกไฟล์ CSV</button></label>
@@ -131,53 +183,93 @@ function renderReconcile(){
 function checkReconcileImport(){
   const raw = parseTable(document.getElementById('rcPaste').value);
   if(!raw.length){ toast('ยังไม่มีข้อมูลให้ตรวจ'); return; }
-  const head = raw[0].join(' ').toLowerCase();
-  const rows = /เลขเคลม|claim/.test(head) ? raw.slice(1) : raw;
-  rcRows = parseReconcile(rows);
+
+  /* หาแถวหัวตาราง — ไล่ดู 5 แถวแรก เอาแถวแรกที่หาคอลัมน์ "เลขเคลม" เจอ */
+  let headerRowIdx = -1, cols = null;
+  for(let i = 0; i < Math.min(raw.length, 5); i++){
+    const c = detectColumns(raw[i]);
+    if(c.id >= 0){ headerRowIdx = i; cols = c; break; }
+  }
+  if(headerRowIdx < 0){
+    toast('หาคอลัมน์ "เลขเคลม" / "Claim_ID (Final)" ในหัวตารางไม่เจอ — ตรวจว่าคัดลอกมาครบทั้งแถวหัวตารางไหม');
+    return;
+  }
+  rcRows = parseReconcile(raw.slice(headerRowIdx + 1), cols);
   showReconcilePreview();
 }
 
-function parseReconcile(rows){
-  const seen = new Set();
-  return rows.map((r, i) => {
-    const [id, carrier, at, store, truck, driver, reason, amt, note] = r;
-    const out = {n:i+1, id:(id||'').trim(), carrier:(carrier||'').trim().toUpperCase(),
-      atRaw:(at||'').trim(), atIso:'', store:(store||'').trim(), truck:(truck||'').trim(),
-      driver:(driver||'').trim(), reason:(reason||'').trim(),
-      amt:parseFloat(amt) || 0, note:(note||'').trim(), status:'ok', msg:''};
+function parseReconcile(rows, cols){
+  const get = (r, field) => cols[field] >= 0 ? (r[cols[field]] ?? '') : '';
+  const hasItemCols = cols.code >= 0 || cols.name >= 0;
 
-    if(!out.id){ out.status = 'skip'; out.msg = 'ไม่มีเลขเคลม'; return out; }
-    if(seen.has(out.id.toUpperCase())){ out.status = 'skip'; out.msg = 'เลขเคลมซ้ำในไฟล์ที่วางมา'; return out; }
-    seen.add(out.id.toUpperCase());
-    if(caseIdExists(out.id)){ out.status = 'skip'; out.msg = 'มีเคสนี้ในระบบแล้ว — ข้ามไม่นำเข้าซ้ำ'; return out; }
+  /* รวมทุกบรรทัดของเลขเคลมเดียวกันเข้าด้วยกันก่อน — ไฟล์จริง 1 เคลมมีได้หลายบรรทัดสินค้า */
+  const groups = new Map();
+  for(const r of rows){
+    const idRaw = String(get(r, 'id') || '').trim();
+    if(!idRaw || !looksLikeClaimId(idRaw)) continue;   /* ไม่มีเลขเคลม → ข้ามเงียบ ๆ ตามที่ตกลงไว้ */
+    const key = idRaw.toUpperCase();
+    if(!groups.has(key)) groups.set(key, {id:idRaw, rows:[]});
+    groups.get(key).rows.push(r);
+  }
 
-    if(out.carrier !== 'DHL' && out.carrier !== 'CJ'){
-      out.msg = 'ไม่ระบุขนส่งชัดเจน จะตั้งเป็น DHL ให้ก่อน — แก้ทีหลังได้';
-      out.carrier = 'DHL'; out.status = 'warn';
+  let n = 0;
+  const out = [];
+  for(const {id, rows:grp} of groups.values()){
+    n++;
+    const first = f => { for(const r of grp){ const v = get(r, f); if(String(v||'').trim()) return String(v).trim(); } return ''; };
+    const out_ = {n, id, carrier:first('carrier').toUpperCase(), atRaw:first('at'), atIso:'',
+      store:first('store'), truck:first('truck'), driver:first('driver'), reason:first('reason'),
+      note:[...new Set(grp.map(r => String(get(r,'note')||'').trim()).filter(Boolean))].join(' // '),
+      exVat:0, vat:0, amt:0, items:[], status:'ok', msg:''};
+
+    /* ยอด: รวม Ex_vat/Vat/Net_amt ของทุกบรรทัดสินค้าในเลขเคลมนี้ */
+    for(const r of grp){
+      const ev = cols.exvat >= 0 ? Math.abs(parseAmt(get(r,'exvat'))) : 0;
+      const vt = cols.vat   >= 0 ? Math.abs(parseAmt(get(r,'vat')))   : 0;
+      let net  = cols.net   >= 0 ? Math.abs(parseAmt(get(r,'net')))   : 0;
+      if(!net && (ev || vt)) net = ev + vt;
+      out_.exVat += ev; out_.vat += vt; out_.amt += net;
+      if(hasItemCols){
+        const code = String(get(r,'code')||'').trim(), name = String(get(r,'name')||'').trim();
+        if(code || name || net) out_.items.push({code, name, amt: net || null});
+      }
     }
-    if(out.atRaw){
-      const d = parseFlexibleDate(out.atRaw);
-      if(d) out.atIso = isoLocal(d);
-      else { out.status = 'warn'; out.msg = (out.msg?out.msg+' · ':'')+'อ่านวันที่รับเมลไม่ออก จะใช้เวลานำเข้าแทน'; }
-    } else { out.status = 'warn'; out.msg = (out.msg?out.msg+' · ':'')+'ไม่มีวันที่รับเมล จะใช้เวลานำเข้าแทน'; }
-    return out;
-  });
+    out_.exVat = Math.round(out_.exVat*100)/100; out_.vat = Math.round(out_.vat*100)/100; out_.amt = Math.round(out_.amt*100)/100;
+
+    if(caseIdExists(out_.id)){ out_.status = 'skip'; out_.msg = 'มีเคสนี้ในระบบแล้ว — ข้ามไม่นำเข้าซ้ำ'; out.push(out_); continue; }
+
+    if(out_.carrier === 'DHL' || out_.carrier === 'CJ'){ /* ระบุมาแล้วในไฟล์ */ }
+    else if(/^MKM-/i.test(out_.id)) out_.carrier = 'DHL';
+    else if(/^CLM-/i.test(out_.id)) out_.carrier = 'CJ';
+    else { out_.carrier = 'DHL'; out_.status = 'warn'; out_.msg = 'ไม่ระบุขนส่งชัดเจน จะตั้งเป็น DHL ให้ก่อน — แก้ทีหลังได้'; }
+
+    if(out_.atRaw){
+      const d = parseFlexibleDate(out_.atRaw);
+      if(d) out_.atIso = isoLocal(d);
+      else { out_.status = 'warn'; out_.msg = (out_.msg?out_.msg+' · ':'')+'อ่านวันที่รับเมลไม่ออก จะใช้เวลานำเข้าแทน'; }
+    } else { out_.status = 'warn'; out_.msg = (out_.msg?out_.msg+' · ':'')+'ไม่มีวันที่รับเมล จะใช้เวลานำเข้าแทน'; }
+    out.push(out_);
+  }
+  return out;
 }
 
 function showReconcilePreview(){
   const good = rcRows.filter(r => r.status !== 'skip');
   const skip = rcRows.filter(r => r.status === 'skip');
   document.getElementById('rcPreview').innerHTML = `
-    <div class="tw" style="margin-top:14px"><table style="min-width:900px"><thead><tr>
-      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th>
-      <th style="text-align:right">ยอด</th><th>ผลตรวจ</th></tr></thead><tbody>
+    <div class="tw" style="margin-top:14px"><table style="min-width:1080px"><thead><tr>
+      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาเหตุ</th>
+      <th style="text-align:right">รายการ</th><th style="text-align:right">Ex_vat</th>
+      <th style="text-align:right">VAT</th><th style="text-align:right">Net_amt</th><th>ผลตรวจ</th></tr></thead><tbody>
       ${rcRows.slice(0, 300).map(r => `<tr style="cursor:default">
         <td class="mono">${r.n}</td>
         <td class="mono">${esc(r.id || '—')}</td>
         <td>${esc(r.carrier || '—')}</td>
         <td class="mono" style="font-size:12px">${r.atIso ? fmt(r.atIso, true) : (r.atRaw ? esc(r.atRaw) : '—')}</td>
-        <td>${esc(r.store || '—')}</td>
-        <td class="mono">${esc(r.truck || '—')}</td>
+        <td style="font-size:12px">${esc(r.reason || '—')}</td>
+        <td class="r">${r.items.length || '—'}</td>
+        <td class="r">${r.exVat ? r.exVat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
+        <td class="r">${r.vat ? r.vat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
         <td class="r">${r.amt ? r.amt.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
         <td>${r.status === 'skip' ? `<span class="chip bad">ข้าม — ${esc(r.msg)}</span>`
             : r.status === 'warn' ? `<span class="chip warn">${esc(r.msg)}</span>`
@@ -186,7 +278,7 @@ function showReconcilePreview(){
     ${rcRows.length > 300 ? `<p class="hint">แสดง 300 บรรทัดแรกจาก ${rcRows.length} — นำเข้าครบทุกบรรทัด</p>` : ''}
     <div class="actions" style="margin-top:12px">
       <button type="button" class="pri" id="rcApply" ${good.length?'':'disabled'}>นำเข้า ${good.length} เคส</button>
-      <span class="hint" style="margin:0">${skip.length} แถวถูกข้าม (ซ้ำ / ไม่มีเลขเคลม)</span></div>`;
+      <span class="hint" style="margin:0">${skip.length} เคลมถูกข้าม (ซ้ำกับที่มีอยู่แล้ว)</span></div>`;
   const ap = document.getElementById('rcApply');
   if(ap) ap.onclick = applyReconcileImport;
 }
@@ -198,7 +290,7 @@ async function applyReconcileImport(){
     const at = r.atIso || isoLocal(NOW());
     const rec = {id:r.id, carrier:r.carrier, store:r.store, store_name:'', dept:'',
       driver:r.driver, truck:r.truck, reason:r.reason, ref_date:at.slice(0,10),
-      amount:Math.round(r.amt*100)/100, items:[],
+      amount:r.amt, ex_vat:r.exVat, vat:r.vat, items:r.items,
       events:[{type:'RECEIVE', at, vendor:null, text:r.note || 'นำเข้าจากไฟล์สรุป Period', src:'reconcile'}],
       source:'reconcile'};
     try{
@@ -216,9 +308,10 @@ async function applyReconcileImport(){
 
 /* ---------- ส่งออก / คัดลอกรายงาน Pending ราย Period ---------- */
 function exportPeriodCsv(R){
-  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ทะเบียน','ยอด (บาท)','รับเมล','สถานะ']];
+  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ทะเบียน','Ex_vat','VAT','ยอด (บาท)','รับเมล','สถานะ']];
   for(const {c, m, bu} of R.list) rows.push([c.id, c.carrier, bu, c.store_name || c.store, c.truck,
-    (c.amount||0).toFixed(2), m.t0 ? fmt(m.t0, true) : '', m.status === 'CLOSED' ? 'ปิดแล้ว' : 'ค้าง (Pending)']);
+    (c.ex_vat||0).toFixed(2), (c.vat||0).toFixed(2), (c.amount||0).toFixed(2),
+    m.t0 ? fmt(m.t0, true) : '', m.status === 'CLOSED' ? 'ปิดแล้ว' : 'ค้าง (Pending)']);
   download(`claim-period-${RC.periodKey}-${stamp()}.csv`, csv(rows));
 }
 

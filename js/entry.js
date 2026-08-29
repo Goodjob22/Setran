@@ -85,6 +85,14 @@ function renderEntry(){
         <tfoot><tr><td colspan="5"><button type="button" class="sm gh" id="eAddItem" style="color:var(--accent)">+ เพิ่มรายการ</button></td>
           <td class="r" style="font-weight:600" id="eTotal">0.00</td><td></td></tr></tfoot></table></div>
 
+        <div class="frow">
+          <div class="fld" style="max-width:150px"><label for="eExVat">ยอดก่อน VAT</label>
+            <input type="text" id="eExVat" inputmode="decimal" placeholder="ถ้ามีแยก VAT"></div>
+          <div class="fld" style="max-width:120px"><label for="eVat">VAT</label>
+            <input type="text" id="eVat" inputmode="decimal" placeholder="ไม่บังคับ"></div>
+          <span class="hint" style="align-self:center;margin-top:16px">ไม่บังคับ — ถ้ายังไม่มีข้อมูล VAT แยก เว้นว่างได้ ยอดรวมด้านบนใช้เป็นยอดเคลมเหมือนเดิม</span>
+        </div>
+
         <div class="frow"><div class="fld"><label for="eNote">หมายเหตุ</label>
           <textarea id="eNote" placeholder="พิมพ์อิสระ — ไม่ถูกนำไปคำนวณเวลา"></textarea></div></div>
         <div id="eWarn"></div>
@@ -307,6 +315,7 @@ async function saveEntry(keepGoing){
     id, carrier:E.carrier, store:store_, store_name:storeName,
     dept:$('eDept').value, driver:$('eDriver').value.trim(), truck,
     reason:$('eReason').value, ref_date:at.slice(0,10), amount:Math.round(itemTotal()*100)/100, items,
+    ex_vat:parseFloat($('eExVat').value) || 0, vat:parseFloat($('eVat').value) || 0,
     events:[{type:'RECEIVE', at, vendor, text:$('eNote').value.trim() || `คีย์เข้าระบบ — ส่งต่อ ${vendor}`, src:'entry'}],
     source:'entry',
   };

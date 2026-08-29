@@ -62,8 +62,29 @@ function download(filename, text, mime){
 }
 const offer = (filename, text) => download(filename, text);
 
-/* ---------- แยกตารางที่วางมาจาก Excel ---------- */
+/* ---------- แยกตารางที่วางมาจาก Excel ----------
+   ตัวคั่นคอลัมน์: มีแท็บในบรรทัดแรก = วางมาจาก Excel (คั่นด้วยแท็บ) ไม่งั้นถือเป็น CSV คั่นด้วยจุลภาค
+   ใช้ state machine อ่านทีละตัวอักษรแบบเข้าใจเครื่องหมายคำพูด เพราะไฟล์จริงจากขนส่งมักมีคอลัมน์
+   ข้อความอิสระ (เช่น หมายเหตุ) ที่มีทั้งจุลภาคและขึ้นบรรทัดใหม่อยู่ในเซลล์เดียว (Excel จะครอบด้วย ""
+   ตอนคัดลอกออกมา) — ถ้าแยกด้วย split ธรรมดาจะพังคอลัมน์เพี้ยนทันที */
 function parseTable(text){
-  return String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-    .map(l => l.split(/\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, '')));
+  text = String(text || '');
+  if(!text.trim()) return [];
+  const firstLine = text.slice(0, (text.indexOf('\n')+1 || text.length+1) - 1);
+  const delim = firstLine.includes('\t') ? '\t' : ',';
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){ if(text[i+1] === '"'){ field += '"'; i++; } else inQuotes = false; }
+      else field += c;
+    } else if(c === '"' && field === ''){ inQuotes = true; }
+    else if(c === delim){ row.push(field); field = ''; }
+    else if(c === '\r'){ /* ข้าม — จัดการที่ \n */ }
+    else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if(field !== '' || row.length){ row.push(field); rows.push(row); }
+  return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c !== ''));
 }

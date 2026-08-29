@@ -61,10 +61,10 @@ document.getElementById('btnMailAll').onclick = () => openMail();
 document.getElementById('memoBarGo').onclick = () => openMemoAssign();
 document.getElementById('memoBarClear').onclick = () => { memoSelect.clear(); render(); };
 document.getElementById('btnExportCase').onclick = () => {
-  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ชื่อสาขา','ทะเบียน','พขร.','ซับปัจจุบัน','ยอด','สาเหตุ',
+  const rows = [['เลขเคลม','ขนส่ง','BU','สาขา','ชื่อสาขา','ทะเบียน','พขร.','ซับปัจจุบัน','ยอดก่อน VAT','VAT','ยอด','สาเหตุ',
     'รับเมล','ครบกำหนด','ปิดเมื่อ','ใช้เวลา(ชม.)','ซับถือเคส(ชม.)','ค้างฝั่งเรา(ชม.)','สถานะ','SLA','ธงตรวจสอบ']];
   for(const {c,m,bu} of visible()) rows.push([c.id, c.carrier, bu, c.store, c.store_name, c.truck, c.driver,
-    m.vendor, c.amount, c.reason, m.t0?fmt(m.t0,true):'', m.deadline?fmt(isoLocal(m.deadline),true):'',
+    m.vendor, c.ex_vat||'', c.vat||'', c.amount, c.reason, m.t0?fmt(m.t0,true):'', m.deadline?fmt(isoLocal(m.deadline),true):'',
     m.tEnd?fmt(m.tEnd,true):'', m.el?.toFixed(2), m.legs.reduce((s,l)=>s+l.h,0).toFixed(2),
     m.internal?.toFixed(2), m.status, m.sla, m.flags.map(f=>f.k).join(' ')]);
   download(`claim-cases-${stamp()}.csv`, csv(rows));

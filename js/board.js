@@ -268,7 +268,8 @@ function openCase(id){
     ${m.flags.map(f => `<div class="warnbox"><b>ตรวจสอบ:</b> ${esc(f.t)}</div>`).join('')}
     <div class="grid2">
       <div class="kv"><div class="k">ซับที่ถือเคสอยู่</div><div class="v">${esc(m.vendor||'—')}</div></div>
-      <div class="kv"><div class="k">ยอดเคลม</div><div class="v">${c.amount?baht(c.amount):'—'} บาท</div></div>
+      <div class="kv"><div class="k">ยอดเคลม</div><div class="v">${c.amount?baht(c.amount):'—'} บาท
+        ${(c.ex_vat||c.vat) ? `<span class="hint" style="margin:2px 0 0;display:block">ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)}</span>` : ''}</div></div>
       <div class="kv"><div class="k">สาเหตุ</div><div class="v">${esc(c.reason||'—')}</div></div>
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
@@ -313,7 +314,8 @@ function openCase(id){
             <select id="fVendor"><option value="">— ไม่ระบุ —</option>${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
         </div>
         <div class="frow"><div class="fld"><label for="fNote">หมายเหตุ (พิมพ์อิสระ)</label>
-          <textarea id="fNote" placeholder="เช่น โทรตามแล้ว ซับขอตรวจกับหน้างานก่อน / แนบใบนำออกแล้ว"></textarea></div></div>
+          <textarea id="fNote" placeholder="เช่น โทรตามแล้ว ซับขอตรวจกับหน้างานก่อน / แนบใบนำออกแล้ว"></textarea>
+          <div id="fReasonPick" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px" hidden></div></div></div>
         <div class="actions"><button type="submit" class="pri">บันทึก</button>
           <span class="hint" style="margin:0">เวลาที่กรอกคือเวลาที่เกิดเหตุการณ์จริง ระบบเก็บเวลาที่กดบันทึกแยกไว้ให้เอง</span></div>
       </form>
@@ -329,6 +331,23 @@ function openCase(id){
       </div>
       <div class="actions"><button type="submit">บันทึกเวลาใหม่</button>
         ${m.fixed?'<button type="button" id="xUndo" class="gh">ย้อนกลับเป็นค่าจากไฟล์</button>':''}</div></form>
+    </fieldset>
+
+    <fieldset><legend>แก้ไขยอดเคลม</legend>
+      <p class="hint">ยอดปัจจุบัน — ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)} = สุทธิ ${baht(c.amount)} บาท ·
+        ต้องระบุเหตุผลทุกครั้งที่แก้ เก็บไว้ในประวัติ ไม่ทับของเดิม</p>
+      <form id="fAmt" novalidate><div class="frow">
+        <div class="fld" style="max-width:150px"><label for="yEx">ยอดก่อน VAT</label>
+          <input type="text" id="yEx" inputmode="decimal" value="${c.ex_vat||''}"></div>
+        <div class="fld" style="max-width:120px"><label for="yVat">VAT</label>
+          <input type="text" id="yVat" inputmode="decimal" value="${c.vat||''}"></div>
+        <div class="fld" style="max-width:150px"><label for="yNet">ยอดสุทธิ (Net_amt)</label>
+          <input type="text" id="yNet" inputmode="decimal" value="${c.amount||''}"></div>
+        <div class="fld"><label for="yWhy">เหตุผลที่แก้ (บังคับกรอก)</label>
+          <input type="text" id="yWhy" required placeholder="เช่น ยอดในไฟล์สรุปตัวจริงไม่ตรงกับที่คีย์ไว้"></div>
+      </div>
+      <div class="actions"><button type="submit">บันทึกยอดใหม่</button>
+        <span class="hint" style="margin:0">กรอกยอดก่อน VAT + VAT แล้วปล่อยช่องยอดสุทธิว่าง ระบบรวมให้เอง หรือจะกรอกยอดสุทธิเองก็ได้</span></div></form>
     </fieldset>
 
     ${m.status === 'CLOSED' ? `<fieldset><legend>เลข Memo</legend>
@@ -354,15 +373,33 @@ function openCase(id){
   dlg.querySelector('.db').scrollTop = 0;
   renderEvidence(c.id);
 
+  /* เลือกประเภท "ซับ Reject" — โชว์ปุ่มสาเหตุที่ใช้บ่อยให้กดแปะลงช่องหมายเหตุแทนพิมพ์เอง */
+  const rejectReasons = [...REASONS, 'ผลิตภัณฑ์ไม่ได้คุณภาพ (แพ็คเกจจิ้ง)'];
+  function syncReasonPick(){
+    const sel = document.getElementById('fType'), box = document.getElementById('fReasonPick');
+    const show = sel.value === 'REJECT' || sel.value === 'REJECT_FINAL';
+    box.hidden = !show;
+    if(show && !box.childElementCount){
+      box.innerHTML = rejectReasons.map(r => `<button type="button" class="sm gh" data-reason="${esc(r)}">${esc(r)}</button>`).join('');
+      box.querySelectorAll('[data-reason]').forEach(b => b.onclick = () => {
+        document.getElementById('fNote').value = b.dataset.reason;
+        document.getElementById('fNote').focus();
+      });
+    }
+  }
   /* เลือก "ออกเลข Memo" ในลิสต์นี้ = ทางลัดเปิดป๊อปอัปใส่เลข Memo โดยตรง
      ไม่ผ่านฟอร์มบันทึกทั่วไป เพราะต้องบังคับกรอกเลขที่ (และเหตุผลถ้าเป็นการแก้ไข) */
   document.getElementById('fType').onchange = () => {
     const sel = document.getElementById('fType');
-    if(sel.value !== 'MEMO') return;
-    sel.value = 'RECEIVE';
-    if(m.status !== 'CLOSED'){ toast('ต้องปิดเคส (ซับรับเคลม หรือ ปิดงานเอง) ก่อน ถึงจะใส่เลข Memo ได้'); return; }
-    m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
+    if(sel.value === 'MEMO'){
+      sel.value = 'RECEIVE'; syncReasonPick();
+      if(m.status !== 'CLOSED'){ toast('ต้องปิดเคส (ซับรับเคลม หรือ ปิดงานเอง) ก่อน ถึงจะใส่เลข Memo ได้'); return; }
+      m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
+      return;
+    }
+    syncReasonPick();
   };
+  syncReasonPick();
   document.getElementById('fAdd').onsubmit = async ev => {
     ev.preventDefault();
     const type = document.getElementById('fType').value;
@@ -384,6 +421,23 @@ function openCase(id){
   };
   const un = document.getElementById('xUndo');
   if(un) un.onclick = async () => { await API.patchCase(c.id, {t0fix:null, t0why:''}); c.t0fix = null; render(); openCase(c.id); };
+  document.getElementById('fAmt').onsubmit = async ev => {
+    ev.preventDefault();
+    const ex = parseFloat(document.getElementById('yEx').value) || 0;
+    const vat = parseFloat(document.getElementById('yVat').value) || 0;
+    const netRaw = document.getElementById('yNet').value.trim();
+    const net = netRaw ? (parseFloat(netRaw) || 0) : Math.round((ex + vat) * 100) / 100;
+    const why = document.getElementById('yWhy').value.trim();
+    if(!why){ document.getElementById('yWhy').reportValidity(); return; }
+    if(ex === (c.ex_vat||0) && vat === (c.vat||0) && net === (c.amount||0)){ toast('ยอดเหมือนเดิม ไม่มีอะไรต้องแก้'); return; }
+    if(!confirm(`ยืนยันแก้ยอดเคลม ${c.id}\n\nจาก ก่อน VAT ${baht(c.ex_vat)} + VAT ${baht(c.vat)} = สุทธิ ${baht(c.amount)}\nเป็น ก่อน VAT ${baht(ex)} + VAT ${baht(vat)} = สุทธิ ${baht(net)}\n\nเหตุผล: ${why}`)) return;
+    const at = isoLocal(NOW());
+    await addEvent(c.id, {at, type:'NOTE', vendor:null,
+      text:`แก้ยอดเคลม จาก ${baht(c.amount)} เป็น ${baht(net)} บาท (ก่อน VAT ${baht(ex)} + VAT ${baht(vat)}) — เหตุผล: ${why}`});
+    await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
+    c.amount = net; c.ex_vat = ex; c.vat = vat;
+    render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
   const dm = document.getElementById('dMemo');
   if(dm) dm.onclick = () => m.memoNo ? openMemoFix(c.id, m.memoNo) : openMemoSingle(c.id);
