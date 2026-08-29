@@ -73,6 +73,7 @@ const RC_ALIASES = {
   net:     ['net_amt', 'netamt', 'ยอด (บาท)', 'ยอด', 'amount'],
   code:    ['item no', 'itemno', 'รหัส'],
   name:    ['art_desc', 'artdesc', 'ชื่อสินค้า'],
+  qty:     ['gor_qty', 'qty'],
   note:    ['note21', 'หมายเหตุ', 'note'],
   mktransport: ['mk transport'],
 };
@@ -203,7 +204,7 @@ function checkReconcileImport(){
 
 function parseReconcile(rows, cols){
   const get = (r, field) => cols[field] >= 0 ? (r[cols[field]] ?? '') : '';
-  const hasItemCols = cols.code >= 0 || cols.name >= 0;
+  const hasItemCols = cols.code >= 0 || cols.name >= 0 || cols.qty >= 0;
 
   /* รวมทุกบรรทัดของเลขเคลมเดียวกันเข้าด้วยกันก่อน — ไฟล์จริง 1 เคลมมีได้หลายบรรทัดสินค้า */
   const groups = new Map();
@@ -235,7 +236,9 @@ function parseReconcile(rows, cols){
       out_.exVat += ev; out_.vat += vt; out_.amt += net;
       if(hasItemCols){
         const code = String(get(r,'code')||'').trim(), name = String(get(r,'name')||'').trim();
-        if(code || name || net) out_.items.push({code, name, amt: net || null});
+        const qty = String(get(r,'qty')||'').trim();
+        if(code || name || net || qty)
+          out_.items.push({code, name, qty_load:'', qty_rec:'', qty_diff:qty, amt: net || null});
       }
     }
     out_.exVat = Math.round(out_.exVat*100)/100; out_.vat = Math.round(out_.vat*100)/100; out_.amt = Math.round(out_.amt*100)/100;

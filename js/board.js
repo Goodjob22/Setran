@@ -306,6 +306,16 @@ function openCase(id){
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
 
+    ${(c.items||[]).length ? `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${c.items.length} รายการ)</div>
+    <div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
+      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
+      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
+      ${c.items.map(it => `<tr style="cursor:default">
+        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
+        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
+        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+
     <div class="slaband">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <b style="font-family:'Bai Jamjuree',sans-serif">นาฬิกา 48 ชั่วโมง</b>
