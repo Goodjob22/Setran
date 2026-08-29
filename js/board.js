@@ -316,6 +316,23 @@ function openCase(id){
         <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
     </tbody></table></div>` : ''}
 
+    <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร.</legend>
+      <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด</p>
+      <form id="fLoc" novalidate><div class="frow">
+        <div class="fld" style="max-width:150px"><label for="lStore">รหัสสาขา</label>
+          <input type="text" id="lStore" autocomplete="off" list="lStoreList" value="${esc(c.store||'')}">
+          <datalist id="lStoreList">${storeOptions().map(([id])=>`<option value="${esc(id)}">`).join('')}</datalist></div>
+        <div class="fld" style="max-width:200px"><label for="lStoreName">ชื่อสาขา</label>
+          <input type="text" id="lStoreName" autocomplete="off" value="${esc(c.store_name||'')}"></div>
+        <div class="fld" style="max-width:150px"><label for="lTruck">ทะเบียนรถ</label>
+          <input type="text" id="lTruck" autocomplete="off" value="${esc(c.truck||'')}"></div>
+        <div class="fld" style="max-width:200px"><label for="lDriver">ชื่อ พขร.</label>
+          <input type="text" id="lDriver" autocomplete="off" list="lDriverList" value="${esc(c.driver||'')}">
+          <datalist id="lDriverList"></datalist></div>
+      </div>
+      <div class="actions"><button type="submit">บันทึก</button></div></form>
+    </fieldset>
+
     <div class="slaband">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <b style="font-family:'Bai Jamjuree',sans-serif">นาฬิกา 48 ชั่วโมง</b>
@@ -479,6 +496,22 @@ function openCase(id){
     await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
     c.amount = net; c.ex_vat = ex; c.vat = vat;
     render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
+  const lDriverList = document.getElementById('lDriverList');
+  if(lDriverList) lDriverList.innerHTML = [...driverMap().values()]
+    .sort((a, b) => b.cases.length - a.cases.length)
+    .map(d => `<option value="${esc(d.display)}">`).join('');
+  document.getElementById('fLoc').onsubmit = async ev => {
+    ev.preventDefault();
+    const storeRaw = document.getElementById('lStore').value.trim();
+    const found = storeRaw ? findStore(storeRaw) : null;
+    const store_ = found ? found[0] : storeRaw;
+    const storeName = document.getElementById('lStoreName').value.trim() || (found ? found[1] : '');
+    const truck = document.getElementById('lTruck').value.trim();
+    const driver = document.getElementById('lDriver').value.trim();
+    await API.patchCase(c.id, {store:store_, store_name:storeName, truck, driver});
+    c.store = store_; c.store_name = storeName; c.truck = truck; c.driver = driver;
+    render(); openCase(c.id); toast('บันทึกสาขา/ทะเบียน/พขร. แล้ว');
   };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
   const dm = document.getElementById('dMemo');
