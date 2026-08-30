@@ -721,6 +721,121 @@ function renderSummaryView(){
   document.getElementById('sumNow').onclick  = () => { SUM.anchorKey = periodOf(NOW()).key; render(); };
   document.querySelectorAll('#summary [data-sumopen]').forEach(tr => tr.onclick = () => {
     RC.periodKey = tr.dataset.sumopen;
-    setView('reconcile');
+    setView('close');
+  });
+}
+
+/* ============================================================
+   แท็บ "ปิดงาน Period" — รวม 4 ขั้นตอนที่เดิมต้องสลับหน้าไปมา (ยังไม่รู้ซับ →
+   รู้ซับ รอยืนยัน → ยืนยันรับแล้ว รอ Memo → ปิด Memo แล้ว) มาไว้หน้าเดียว ยึด "1 Period"
+   เป็นศูนย์กลาง เป้าหมายไม่ใช่ปิดให้ครบ 100% แต่ให้รู้สถานะของทุกเคสในรอบชัดเจนว่าติดอยู่ขั้นไหน
+   ใช้ RC.periodKey ตัวเดียวกับแท็บ "นำเข้าสรุป Period" (สลับแท็บแล้ว Period ที่เลือกไว้ยังเป็นรอบเดิม)
+   ============================================================ */
+let PC = {stage:'all'};
+const CLOSE_STAGE_TH = {novendor:'ยังไม่รู้ซับ', pending:'รู้ซับ รอยืนยัน', confirm:'ยืนยันรับแล้ว รอ Memo', memo:'ปิด Memo แล้ว'};
+const CLOSE_STAGE_CLS = {novendor:'bad', pending:'warn', confirm:'a', memo:'okdark'};
+function closeStage(m){
+  if(m.status === 'CLOSED' && m.memoNo) return 'memo';
+  if(m.status === 'CLOSED') return 'confirm';
+  if(m.vendor) return 'pending';
+  return 'novendor';
+}
+
+/* ข้อมูลไฟล์เทียบยอด (ยอดไม่ตรง/มีแต่ในไฟล์) มีให้ดูเฉพาะตอนที่เพิ่งวาง/ตรวจไฟล์ของ Period นี้ไว้ในเซสชันนี้
+   เท่านั้น (เหมือนคอลัมน์ "ยัง Unmatch" ในหน้าสรุปราย Period) — ถ้ายังไม่ตรวจ จะโชว์แค่สถานะระบบล้วน ๆ */
+function periodCloseData(periodKey){
+  const p = periodFromKey(periodKey);
+  const list = CACHE.filter(({m}) => m.t0 && D(m.t0) >= p.start && D(m.t0) < p.end);
+  const hasFile = !!(rcRows && rcRowsPeriodKey === periodKey);
+  let cmpById = new Map(), fileOnly = [], fileAmtById = new Map();
+  if(hasFile){
+    const groups = buildReconcileCompare({list});
+    for(const g of groups) for(const it of g.items){
+      if(it.cmp === 'fileonly'){ fileOnly.push(it); continue; }
+      cmpById.set(it.id, it.cmp);
+      if(it.fileAmt != null) fileAmtById.set(it.id, it.fileAmt);
+    }
+  }
+  const rows = list.map(x => ({...x, stage:closeStage(x.m),
+    cmp: cmpById.get(x.c.id) || null,
+    fileAmt: fileAmtById.has(x.c.id) ? fileAmtById.get(x.c.id) : null,
+    guess: !x.m.vendor ? bestGuess(x.c) : null}));
+  return {p, rows, hasFile, fileOnly};
+}
+
+function renderPeriodClose(){
+  const D_ = periodCloseData(RC.periodKey);
+  const counts = {novendor:0, pending:0, confirm:0, memo:0};
+  for(const r of D_.rows) counts[r.stage]++;
+  const nMismatch = D_.rows.filter(r => r.cmp === 'mismatch').length;
+  const shown = D_.rows.filter(r => PC.stage === 'all' ? true
+    : PC.stage === 'mismatch' ? r.cmp === 'mismatch' : r.stage === PC.stage);
+  const fmtAmt = v => (v||0).toLocaleString('th-TH', {minimumFractionDigits:2});
+  const chip = (key, label, n) => `<button type="button" class="sm ${PC.stage===key?'pri':''}" data-pcstage="${key}">${label} <b>${n}</b></button>`;
+
+  document.getElementById('close').innerHTML = `
+    <div class="panel">
+      <div class="phead"><h3>ปิดงาน Period (16–15)</h3>
+        <span class="sp">
+          <button type="button" class="sm" id="pcPrev">‹ Period ก่อนหน้า</button>
+          <span class="mono" style="font-size:12.5px">${esc(periodLabel(D_.p))}</span>
+          <button type="button" class="sm" id="pcNext">Period ถัดไป ›</button>
+          <button type="button" class="sm" id="pcNow">Period ปัจจุบัน</button></span></div>
+      <div class="pbody" style="padding:12px 16px">
+        <p class="hint" style="margin:0">เป้าหมายของหน้านี้คือรู้สถานะของทุกเคสในรอบให้ครบ ไม่จำเป็นต้องปิดให้หมด 100%
+          เคสที่ยังไม่จบค้างข้ามไปรอบถัดไปได้ตามจริง — ${D_.hasFile
+            ? `ตรวจไฟล์ Period นี้ไว้แล้วในเซสชันนี้ จึงเห็นคอลัมน์ยอดไฟล์/ผลตรวจด้วย`
+            : `ยังไม่ได้ตรวจไฟล์สรุป Period นี้ในเซสชันนี้ — ไปวาง/ตรวจไฟล์ที่แท็บ "นำเข้าสรุป Period" ก่อน
+               ถ้าอยากเห็นว่ายอดตรงไฟล์ขนส่งไหม`}</p>
+      </div>
+      <div class="pbody" style="padding:0 16px 14px">
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          ${chip('all','ทั้งหมด',D_.rows.length)}
+          ${chip('novendor',CLOSE_STAGE_TH.novendor,counts.novendor)}
+          ${chip('pending',CLOSE_STAGE_TH.pending,counts.pending)}
+          ${chip('confirm',CLOSE_STAGE_TH.confirm,counts.confirm)}
+          ${chip('memo',CLOSE_STAGE_TH.memo,counts.memo)}
+          ${D_.hasFile ? chip('mismatch','ยอดไม่ตรงไฟล์',nMismatch) : ''}
+        </div>
+      </div>
+      <div class="tw" style="border:0;border-top:1px solid var(--rule)">
+        <table style="min-width:${D_.hasFile?1100:820}px"><thead><tr>
+          <th style="width:30px"></th><th>เลขเคลม</th><th>ซับ</th>
+          <th style="text-align:right">ยอดระบบ</th>
+          ${D_.hasFile ? '<th style="text-align:right">ยอดไฟล์</th><th>ผลตรวจ</th>' : ''}
+          <th>สถานะ</th><th></th></tr></thead><tbody>
+        ${shown.length ? shown.map(r => { const pickable = r.m.status === 'OPEN' || (r.m.status === 'CLOSED' && !r.m.memoNo);
+          return `<tr style="cursor:default">
+          <td onclick="event.stopPropagation()">${pickable
+            ? `<input type="checkbox" class="pcPick" data-id="${esc(r.c.id)}" ${boardSelect.has(r.c.id)?'checked':''}>` : ''}</td>
+          <td class="mono">${esc(r.c.id)}</td>
+          <td>${r.m.vendor ? esc(r.m.vendor)
+              : r.guess ? `<span class="chip a">${esc(r.guess.vendor)}?</span><span class="sub">${esc(r.guess.why)}</span>`
+              : '<span class="chip bad">ไม่มีเบาะแส</span>'}</td>
+          <td class="r">${r.c.amount?fmtAmt(r.c.amount):'—'}</td>
+          ${D_.hasFile ? `<td class="r">${r.fileAmt!=null?fmtAmt(r.fileAmt):'—'}</td>
+            <td>${r.cmp==='mismatch' ? '<span class="chip bad">ไม่ตรงกัน</span>'
+                : r.cmp==='match' ? '<span class="chip ok">ตรงกัน</span>'
+                : '<span class="chip n">ไม่มีในไฟล์</span>'}</td>` : ''}
+          <td><span class="chip ${CLOSE_STAGE_CLS[r.stage]}">${CLOSE_STAGE_TH[r.stage]}</span></td>
+          <td><button type="button" class="sm gh" data-pcopen="${esc(r.c.id)}">เปิด</button></td>
+        </tr>`; }).join('') : `<tr><td colspan="${D_.hasFile?8:6}" class="empty">ไม่มีเคสในหมวดนี้</td></tr>`}
+        </tbody></table>
+      </div>
+      ${D_.hasFile && D_.fileOnly.length ? `<div class="pbody" style="padding:0 16px 14px">
+        <div class="warnbox"><b>มีในไฟล์แต่ยังไม่คีย์เข้าระบบเลย ${D_.fileOnly.length} รายการ</b> —
+          ${D_.fileOnly.map(x => esc(x.id)).join(' · ')}<br>
+          ไปนำเข้าที่แท็บ "นำเข้าสรุป Period" ได้เลย</div>
+      </div>` : ''}
+    </div>`;
+
+  document.getElementById('pcPrev').onclick = () => { RC.periodKey = shiftPeriod(RC.periodKey, -1); render(); };
+  document.getElementById('pcNext').onclick = () => { RC.periodKey = shiftPeriod(RC.periodKey, 1); render(); };
+  document.getElementById('pcNow').onclick  = () => { RC.periodKey = periodOf(NOW()).key; render(); };
+  document.querySelectorAll('[data-pcstage]').forEach(b => b.onclick = () => { PC.stage = b.dataset.pcstage; render(); });
+  document.querySelectorAll('[data-pcopen]').forEach(b => b.onclick = () => openCase(b.dataset.pcopen));
+  document.querySelectorAll('.pcPick').forEach(cb => cb.onchange = () => {
+    if(cb.checked) boardSelect.add(cb.dataset.id); else boardSelect.delete(cb.dataset.id);
+    renderMemoBar();
   });
 }
