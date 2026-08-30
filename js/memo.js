@@ -56,6 +56,23 @@ function byVendor(list){
   return [...g.entries()].map(([v, items]) => ({v, ...agg(items), items}))
                          .sort((a,b) => b.openAmt - a.openAmt || b.n - a.n);
 }
+/* แยกตามประเภทการเคลม (c.reason) — เคสคีย์มือมีแค่ 4 ประเภทมาตรฐาน (REASONS) แต่เคสนำเข้าจากไฟล์สรุป
+   Period ใช้สาเหตุตามคำจริงในไฟล์ขนส่ง (Reason20) ซึ่งพิมพ์ไม่ซ้ำกันได้หลายแบบ — ถ้ามีมากกว่า cap
+   ประเภท จะรวมส่วนที่เหลือเป็น "อื่น ๆ" กันตารางยาวเกินจนดูไม่ออกว่าอะไรเป็นสัดส่วนใหญ่จริง ๆ */
+function byReason(list, cap = 8){
+  const g = new Map();
+  for(const {c} of list){
+    const r = String(c.reason || '').trim() || 'ไม่ระบุสาเหตุ';
+    const s = g.get(r) || {reason:r, n:0, amt:0};
+    s.n++; s.amt += (c.amount || 0);
+    g.set(r, s);
+  }
+  const all = [...g.values()].sort((a,b) => b.n - a.n);
+  if(all.length <= cap) return all;
+  const top = all.slice(0, cap - 1), rest = all.slice(cap - 1);
+  return [...top, {reason:`อื่น ๆ (${rest.length} ประเภท)`,
+    n: rest.reduce((s,x) => s+x.n, 0), amt: rest.reduce((s,x) => s+x.amt, 0)}];
+}
 function rangeLabel(){
   const f = M.from ? M.from.split('-').reverse().join('/') : 'เริ่มต้น';
   const t = M.to   ? M.to.split('-').reverse().join('/')   : 'ปัจจุบัน';
@@ -63,7 +80,7 @@ function rangeLabel(){
 }
 
 function renderMemo(){
-  const list = memoSet(), T = agg(list), V = byVendor(list);
+  const list = memoSet(), T = agg(list), V = byVendor(list), RS = byReason(list);
   document.getElementById('count').textContent = `${list.length} เคสในรายงาน`;
   /* เคสที่ปิดแล้วแต่ยังไม่ได้ออกเลข Memo — "รอเปิด Memo" */
   const pendingMemo = T.closed - T.memoed, pendingMemoAmt = T.closedAmt - T.memoedAmt;
@@ -166,6 +183,25 @@ function renderMemo(){
         <td class="r">${T.avgLeg!=null?T.avgLeg.toFixed(1):'—'}</td><td class="r">${T.avgInt!=null?T.avgInt.toFixed(1):'—'}</td>
       </tr></tfoot>` : ''}
       </table></div>
+    </div>
+
+    <div class="panel">
+      <div class="phead"><h3>แยกตามประเภทการเคลม</h3>
+        <span class="sp hint" style="margin:0">${T.n} เคส · ${baht0(T.amt)} บาท</span></div>
+      <div class="tw" style="border:0"><table style="min-width:640px"><thead><tr>
+        <th>ประเภทการเคลม</th><th style="text-align:right">จำนวนเคส</th><th style="text-align:right">% ของเคส</th>
+        <th style="text-align:right">ยอดเงิน</th><th style="text-align:right">% ของยอด</th>
+      </tr></thead><tbody>
+      ${RS.length ? RS.map(r => {
+          const pctN = T.n ? Math.round(r.n / T.n * 100) : 0;
+          const pctAmt = T.amt ? Math.round(r.amt / T.amt * 100) : 0;
+          return `<tr style="cursor:default">
+        <td>${esc(r.reason)}<span class="vbar"><i style="width:${pctN}%;background:var(--accent)"></i></span></td>
+        <td class="r">${r.n}</td><td class="r">${pctN}%</td>
+        <td class="r">${baht0(r.amt)}</td><td class="r">${pctAmt}%</td>
+      </tr>`;
+        }).join('') : '<tr><td colspan="5" class="empty">ไม่มีเคสในเงื่อนไขที่เลือก</td></tr>'}
+      </tbody></table></div>
     </div>`;
 
   document.getElementById('mFrom').onchange = e => { M.from = e.target.value; render(); };
@@ -187,6 +223,7 @@ function renderMemo(){
 }
 
 function exportSummary(list, T, V){
+  const RS = byReason(list, Infinity);   /* ไม่ตัด "อื่น ๆ" ในไฟล์ส่งออก — เอาให้ครบทุกประเภทจริง ๆ */
   const rows = [
     ['สรุปงานเคลม DHL / CJ'], ['ช่วงวันที่รับเมล', rangeLabel()],
     ['ขอบเขต', {all:'ทุกสถานะ',open:'เฉพาะเคสค้าง',closed:'เฉพาะเคสสำเร็จ'}[M.scope]],
@@ -213,6 +250,9 @@ function exportSummary(list, T, V){
     r.avgLeg!=null?r.avgLeg.toFixed(2):'', r.avgInt!=null?r.avgInt.toFixed(2):''];
   for(const r of V) rows.push(line(r));
   rows.push(line(T));
+  rows.push([], ['แยกตามประเภทการเคลม'], ['ประเภทการเคลม','จำนวนเคส','% ของเคส','ยอดเงิน (บาท)','% ของยอด']);
+  for(const r of RS) rows.push([r.reason, r.n, T.n ? Math.round(r.n/T.n*100) : 0,
+    r.amt.toFixed(2), T.amt ? Math.round(r.amt/T.amt*100) : 0]);
   download(`claim-summary-${stamp()}.csv`, csv(rows));
 }
 
