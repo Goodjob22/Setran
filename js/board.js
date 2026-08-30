@@ -38,6 +38,9 @@ function renderVendorStrip(){
     if(x.status === 'CLOSED'){ s.closed++; s.sum += x.el; s.n++; }
     m.set(v, s);
   }
+  /* ซับที่มีในระบบแต่ยังไม่มีเคสเลย (เพิ่งเพิ่มใหม่) ก็ต้องมีการ์ดให้กดกรองได้เหมือนกัน
+     ไม่งั้นการ์ดจะโผล่มาก็ต่อเมื่อมีเคสแรกเข้ามาแล้วเท่านั้น */
+  for(const v of vendorNames(true)) if(!m.has(v)) m.set(v, {v, open:0, breach:0, closed:0, sum:0, n:0});
   const st = [...m.values()].sort((a,b) => (b.open+b.closed) - (a.open+a.closed));
   const total = list.length;
   const tOpen = list.filter(x => x.m.status === 'OPEN').length;
@@ -274,7 +277,6 @@ function renderQueue(){
     </div>`;
   }).join('');
   bindUnknown(el);
-  el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
   el.querySelectorAll('[data-mail]').forEach(b => b.onclick = () => openMail(b.dataset.mail));
   el.querySelectorAll('[data-sent]').forEach(cb => cb.onchange = async () => {
     const id = cb.dataset.sent;
@@ -724,18 +726,24 @@ function renderUnknownPanel(){
     </div>
 
     <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
-      <table style="min-width:900px"><thead><tr>
-        <th>เลขเคลม</th><th>ทะเบียน · พขร.</th><th>ค้างมาแล้ว</th>
-        <th>ผู้ต้องสงสัย</th><th>รู้มาจากไหน</th></tr></thead><tbody>
+      <table style="min-width:1020px"><thead><tr>
+        <th>เลขเคลม</th><th>ทะเบียน · พขร.</th><th style="text-align:right">ยอดเงิน</th><th>ค้างมาแล้ว</th>
+        <th>ผู้ต้องสงสัย</th><th>รู้มาจากไหน</th><th></th></tr></thead><tbody>
       ${list.map(({c, m, guess}) => `<tr data-open="${esc(c.id)}">
         <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
         <td>${esc(c.truck || '—')}<span class="sub">${esc(c.driver || 'ไม่มีชื่อ พขร.')}</span></td>
+        <td class="r">${c.amount ? baht(c.amount) : '—'}</td>
         <td class="mono" style="color:var(--bad)">${m.remain < 0 ? 'เกิน ' + hrs(-m.remain) : hrs(m.remain)}</td>
         <td>${guess.length
             ? guess.map(g => `<span class="chip ${g.tier <= 2 ? 'ok' : 'a'}">${esc(g.vendor)}</span>`).join(' ')
             : '<span class="chip bad">ไม่มีเบาะแส</span>'}</td>
         <td class="sub">${guess.length ? esc(guess[0].why) : 'ไม่มีทั้งประวัติ ชื่อคนขับ และรายชื่อรถ'}</td>
-      </tr>`).join('')}
+        <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+      </tr>
+      <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="7" style="padding:0 0 10px">
+        <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+        <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+      </td></tr>`).join('')}
       </tbody></table>
     </div>
 
@@ -772,6 +780,19 @@ function bindUnknown(el){
   if(fk) fk.onclick = () => fillKnownVendors();
   const go = el.querySelector('#unkGoFleet');
   if(go) go.onclick = () => setView('fleet');
+  el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
+  el.querySelectorAll('[data-logtoggle]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const row = b.closest('tr').nextElementSibling;
+    if(row) row.hidden = !row.hidden;
+  });
+  el.querySelectorAll('.logrow [data-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const id = b.closest('[data-logrow]').dataset.logrow;
+    await API.delEvent(id, b.dataset.del);
+    S.events[id] = (S.events[id]||[]).filter(x => x.id !== b.dataset.del);
+    render();
+  });
 }
 
 /* คิวรายชื่อซับที่ต้องถามต่อ เวลาผู้ใช้กด "ถามทั้งหมด" */
