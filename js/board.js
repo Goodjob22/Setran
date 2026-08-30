@@ -316,8 +316,8 @@ function openCase(id){
         <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
     </tbody></table></div>` : ''}
 
-    <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร.</legend>
-      <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด</p>
+    <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร. / ซับ</legend>
+      <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด — เปลี่ยนซับที่นี่จะบันทึกเป็นบันทึกเหตุการณ์ "ส่งเมลให้ซับ" ให้อัตโนมัติ</p>
       <form id="fLoc" novalidate><div class="frow">
         <div class="fld" style="max-width:150px"><label for="lStore">รหัสสาขา</label>
           <input type="text" id="lStore" autocomplete="off" list="lStoreList" value="${esc(c.store||'')}">
@@ -329,6 +329,9 @@ function openCase(id){
         <div class="fld" style="max-width:200px"><label for="lDriver">ชื่อ พขร.</label>
           <input type="text" id="lDriver" autocomplete="off" list="lDriverList" value="${esc(c.driver||'')}">
           <datalist id="lDriverList"></datalist></div>
+        <div class="fld" style="max-width:200px"><label for="lVendor">ซับ</label>
+          <select id="lVendor"><option value="">— ไม่ระบุ —</option>
+            ${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
       </div>
       <div class="actions"><button type="submit">บันทึก</button></div></form>
     </fieldset>
@@ -509,9 +512,16 @@ function openCase(id){
     const storeName = document.getElementById('lStoreName').value.trim() || (found ? found[1] : '');
     const truck = document.getElementById('lTruck').value.trim();
     const driver = document.getElementById('lDriver').value.trim();
+    const newVendor = document.getElementById('lVendor').value;
+    if(newVendor && newVendor !== m.vendor){
+      if(m.status === 'CLOSED' &&
+         !confirm(`เคส ${c.id} ปิดแล้ว — เปลี่ยนซับจะนับว่าส่งงานต่อ และเปิดเคสขึ้นมานับเวลาใหม่\n\nยืนยันเปลี่ยนซับเป็น "${newVendor}"?`)) return;
+      await addEvent(c.id, {at:isoLocal(NOW()), type:'FORWARD', vendor:newVendor,
+        text:`ส่งเมลให้ซับ ${newVendor} (แก้ไขจากหน้าเคส)`});
+    }
     await API.patchCase(c.id, {store:store_, store_name:storeName, truck, driver});
     c.store = store_; c.store_name = storeName; c.truck = truck; c.driver = driver;
-    render(); openCase(c.id); toast('บันทึกสาขา/ทะเบียน/พขร. แล้ว');
+    render(); openCase(c.id); toast('บันทึกสาขา/ทะเบียน/พขร./ซับ แล้ว');
   };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
   const dm = document.getElementById('dMemo');
