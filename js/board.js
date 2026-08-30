@@ -756,11 +756,13 @@ function renderUnknownPanel(){
       </div></div>` : ''}
 
     ${none.length ? `<div class="pbody" style="padding:0 16px 14px">
-      <div class="warnbox"><b>${none.length} เคสยังไม่มีเบาะแสเลย</b>
-        ${none.map(x => esc(x.c.id)).join(' · ')}<br>
+      <div class="warnbox"><b>${none.length} เคสยังไม่มีเบาะแสเลย</b> —
         ทะเบียนพวกนี้ไม่เคยมีซับไหนรับเคลม ไม่มีชื่อคนขับที่ชี้ได้ และไม่อยู่ในรายชื่อรถของซับรายใด
         — ลองนำเข้ารายชื่อรถของซับเพิ่มที่หน้าทะเบียนรถ
-        <button type="button" class="sm" id="unkGoFleet" style="margin-left:6px">ไปหน้าทะเบียนรถ</button></div>
+        <button type="button" class="sm" id="unkGoFleet" style="margin-left:6px">ไปหน้าทะเบียนรถ</button>
+        <button type="button" class="sm" id="unkNoneToggle" style="margin-left:6px">ดูรายการเคส</button>
+        <div id="unkNoneList" hidden style="margin-top:8px">${none.map(x => esc(x.c.id)).join(' · ')}</div>
+      </div>
     </div>` : ''}
   </div>`;
 }
@@ -780,6 +782,12 @@ function bindUnknown(el){
   if(fk) fk.onclick = () => fillKnownVendors();
   const go = el.querySelector('#unkGoFleet');
   if(go) go.onclick = () => setView('fleet');
+  const nt = el.querySelector('#unkNoneToggle');
+  if(nt) nt.onclick = () => {
+    const list = el.querySelector('#unkNoneList');
+    list.hidden = !list.hidden;
+    nt.textContent = list.hidden ? 'ดูรายการเคส' : 'ซ่อนรายการเคส';
+  };
   el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
   el.querySelectorAll('[data-logtoggle]').forEach(b => b.onclick = e => {
     e.stopPropagation();
