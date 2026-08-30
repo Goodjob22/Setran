@@ -124,19 +124,28 @@ async function bulkAccept(){
    รันอัตโนมัติทุกครั้งที่ render() ทุกหน้า ไม่ต้องกดปุ่ม — ไม่แตะเคสที่ทะเบียนชี้ไปหลายซับพร้อมกัน (bestGuess
    คืน null) และไม่แตะเคสที่ปิดแล้วเด็ดขาด (เปิดเคสที่ปิดแล้วขึ้นมาใหม่โดยไม่มีใครขอ อันตรายกว่าประโยชน์ที่ได้)
    ใช้ CACHE ทั้งก้อนไม่กรองตาม Slicer เพราะเป็นงานหลังบ้านที่ต้องทำให้ครบไม่ว่าอยู่หน้าไหน/กรองอะไรอยู่
-   จำกัดจำนวนต่อรอบไว้กันยิงคำขอพร้อมกันเยอะเกินไปตอนเพิ่งโหลดหน้า — ที่เหลือจะรันต่อในรอบ render() ถัดไปเอง */
+   จำกัดจำนวนต่อรอบไว้กันยิงคำขอพร้อมกันเยอะเกินไปตอนเพิ่งโหลดหน้า — ที่เหลือจะรันต่อในรอบ render() ถัดไปเอง
+
+   ห้ามเรียก addEvent() ช่วย (มัน render() ทุกครั้งที่บันทึกสำเร็จ) — ถ้ามีหลายสิบเคสให้เติม จะ render()
+   รัวๆ ทับหน้าจอซ้ำ ๆ จนฟอร์มที่กำลังพิมพ์อยู่ (เช่นหน้า "คีย์งานเข้า"/"ตั้งค่า") ข้อมูลหายก่อนกดบันทึกทัน
+   จึงยิง API ตรง ๆ สะสมผลไว้ก่อน แล้วค่อย render() รวมทีเดียวตอนจบชุด — และงดรันทั้งชุดถ้าอยู่หน้าฟอร์มพวกนี้อยู่ */
 let autoFillBusy = false;
 async function autoFillKnownVendors(){
   if(autoFillBusy) return;
+  if(F.view === 'entry' || F.view === 'settings') return;
   const sel = CACHE.filter(({m}) => m.status === 'OPEN' && !m.vendor)
     .map(x => ({...x, g: bestGuess(x.c)})).filter(x => x.g).slice(0, 50);
   if(!sel.length) return;
   autoFillBusy = true;
   try{
     const at = isoLocal(NOW());
-    for(const x of sel)
-      await addEvent(x.c.id, {at, type:'FORWARD', vendor:x.g.vendor, text:`ตั้งซับอัตโนมัติจากทะเบียนที่ระบบรู้จักแล้ว (${x.g.why})`});
+    for(const x of sel){
+      const j = await API.addEvent(x.c.id, {at, type:'FORWARD', vendor:x.g.vendor,
+        text:`ตั้งซับอัตโนมัติจากทะเบียนที่ระบบรู้จักแล้ว (${x.g.why})`});
+      (S.events[x.c.id] ||= []).push(j.event);
+    }
     toast(`ตั้งซับอัตโนมัติให้แล้ว ${sel.length} เคส (ทะเบียนที่รู้จักซับชัดเจน)`);
+    if(F.view !== 'entry' && F.view !== 'settings') render();
   } finally { autoFillBusy = false; }
 }
 
