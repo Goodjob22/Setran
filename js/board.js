@@ -117,6 +117,18 @@ async function bulkAccept(){
   toast(`ทำเครื่องหมายซับรับเคลมแล้ว ${withVendor.length} เคส${noVendor.length?` · ข้าม ${noVendor.length} เคส (ไม่รู้ซับ)`:''}`);
 }
 
+/* เติมซับให้เคสที่ยังไม่รู้ว่าเป็นของซับไหน แต่ทะเบียนชี้ไปที่ซับเดียวชัดเจน (เคยรับเคลม/ตั้งซับสัมปทานไว้)
+   ไม่แตะเคสที่ทะเบียนชี้ไปหลายซับพร้อมกัน (bestGuess คืน null) — เคสพวกนั้นยังต้องไล่ถามเองผ่านปุ่ม "ร่างเมลถาม" */
+async function fillKnownVendors(){
+  const sel = unknownCases().map(x => ({...x, g: bestGuess(x.c)})).filter(x => x.g);
+  if(!sel.length) return;
+  if(!confirm(`เติมซับให้ ${sel.length} เคส ตามทะเบียนที่ระบบรู้จักแล้ว (เช่น ${sel[0].c.id}: ${sel[0].g.vendor} — ${sel[0].g.why})\n\nระบบจะบันทึกเป็นเหตุการณ์ "ส่งเมลให้ซับ" ให้อัตโนมัติทีละเคส ยังไม่ได้ทำเครื่องหมายรับเคลม แค่ระบุว่าซับไหนถืออยู่`)) return;
+  const at = isoLocal(NOW());
+  for(const x of sel)
+    await addEvent(x.c.id, {at, type:'FORWARD', vendor:x.g.vendor, text:`ตั้งซับอัตโนมัติจากทะเบียนที่ระบบรู้จักแล้ว (${x.g.why})`});
+  toast(`เติมซับให้แล้ว ${sel.length} เคส`);
+}
+
 function renderTable(){
   const list = visible().sort((a,b) => {
     const rank = x => x.m.status === 'CLOSED' ? 2 : x.m.status === 'NO_DATA' ? 1 : 0;
@@ -694,18 +706,21 @@ function renderUnknownPanel(){
   if(!list.length) return '';
   const groups = unknownByVendor(list);
   const none = list.filter(x => !x.guess.length);
+  const sure = list.filter(x => bestGuess(x.c));
   const TIER = {1:'เคยรับเคลมทะเบียนนี้', 2:'จากชื่อ พขร.', 3:'จากรายชื่อรถของซับ', 4:'ซับสัมปทาน'};
 
   return `<div class="qgroup" id="unkPanel">
     <div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
       <span class="chip ${list.length ? 'warn' : 'ok'}">${list.length} เคสค้าง</span>
-      <span class="sp">${groups.length
-        ? `<button type="button" class="sm pri" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
+      <span class="sp">
+        ${sure.length ? `<button type="button" class="sm pri" id="unkFillKnown">เติมซับให้ ${sure.length} เคสที่รู้จักทะเบียนแน่ชัดแล้ว</button>` : ''}
+        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
 
     <div class="pbody" style="padding:12px 16px 0">
       <p class="hint" style="margin:0">ระบบไล่หาเจ้าของจากหลักฐานที่มี — ทะเบียนที่เคยรับเคลม
         ชื่อคนขับ และรายชื่อรถที่ซับแจ้งไว้ แล้วเสนอเป็น<b>ผู้ต้องสงสัย</b>
-        เคสหนึ่งมีได้หลายราย เพราะเป้าหมายคือไล่ถามให้ครบ ไม่ใช่ตัดสินแทน</p>
+        เคสหนึ่งมีได้หลายราย เพราะเป้าหมายคือไล่ถามให้ครบ ไม่ใช่ตัดสินแทน
+        ${sure.length ? ` — ${sure.length} เคสในนี้ทะเบียนชี้ไปที่ซับเดียวชัดเจน (ไม่มีคนอื่นเสมอ) กดปุ่มด้านบนเพื่อเติมซับให้ทันทีได้`:''}</p>
     </div>
 
     <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
@@ -753,6 +768,8 @@ function bindUnknown(el){
     askQueue = g.map(x => x.v);
     openAskMail(askQueue[0]);
   };
+  const fk = el.querySelector('#unkFillKnown');
+  if(fk) fk.onclick = () => fillKnownVendors();
   const go = el.querySelector('#unkGoFleet');
   if(go) go.onclick = () => setView('fleet');
 }
