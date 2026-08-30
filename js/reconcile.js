@@ -105,6 +105,8 @@ function extractTruckDriver(note){
 
 let RC = {periodKey: periodOf(NOW()).key};
 let rcRows = null;
+let rcRowsPeriodKey = null;   /* Period ที่ rcRows ชุดปัจจุบันตรวจไว้ — ใช้เช็คว่าตัวเลข "ไม่ตรงไฟล์"
+                                  ในแท็บสรุปยังใช้ได้อยู่ไหม (สลับ Period แล้วไม่ได้ตรวจไฟล์รอบนั้นซ้ำ) */
 let rcImported = false;   /* true หลังกดนำเข้าแล้ว — ซ่อนตารางตรวจก่อนนำเข้า แต่ตารางเทียบยอดยังโชว์ต่อ
                              ให้เลือกเคสที่เพิ่งนำเข้าไปปิด/ออก Memo ต่อได้เลยโดยไม่ต้องสลับแท็บ */
 let rcLastImport = [];    /* เลขเคลมที่นำเข้ารอบล่าสุด — เผื่อนำเข้าผิด/ข้อมูลไม่ครบ จะได้ลบทั้งชุดได้ในคลิกเดียว
@@ -225,6 +227,7 @@ function checkReconcileImport(){
   if(cols.exvat < 0 && cols.vat < 0 && cols.net < 0)
     toast('ไม่พบคอลัมน์ยอดเงินเลย (Ex_vat / Vat / Net_amt) — ทุกเคสจะนำเข้าด้วยยอด 0 บาท ตรวจว่าคัดลอกครบทุกคอลัมน์ไหม');
   rcRows = parseReconcile(raw.slice(headerRowIdx + 1), cols);
+  rcRowsPeriodKey = RC.periodKey;
   rcImported = false;
   showReconcilePreview();
   renderReconcileCompare(buildReconcileCompare(pendingReportData()));
@@ -629,4 +632,95 @@ function copyPeriodReport(R){
   navigator.clipboard.writeText(text)
     .then(() => toast('คัดลอกรายงานแล้ว — วางในอีเมลหรือเอกสารได้เลย'))
     .catch(() => toast('คัดลอกไม่สำเร็จ — ใช้ปุ่มส่งออก CSV แทนได้'));
+}
+
+/* ============================================================
+   แท็บ "สรุปราย Period" — ตารางเทียบหลาย Period พร้อมกัน เคารพตัวกรอง
+   Slicer ด้านบน (ขนส่ง/BU/สถานะ/ซับ/คำค้น) ทุกคอลัมน์ ยกเว้น "ไม่ตรงไฟล์"
+   ที่จงใจไม่กรอง เพราะเป็นการตรวจความครบถ้วนของข้อมูลทั้งรอบเทียบกับไฟล์
+   ขนส่ง ไม่ใช่มุมมองที่เลือกดู — กรองแล้วจะเทียบไม่ครบ เข้าใจผิดว่าขาดทั้งที่แค่ถูกกรองออก
+   ============================================================ */
+let SUM = {anchorKey: periodOf(NOW()).key};
+const SUM_WINDOW = 6;
+
+function periodSummaryRow(periodKey){
+  const p = periodFromKey(periodKey);
+  const inRange = ({m}) => m.t0 && D(m.t0) >= p.start && D(m.t0) < p.end;
+  const inPeriod = visible().filter(inRange);        /* เคารพ Slicer — ใช้แสดงจำนวน/ยอดตามมุมมองที่เลือก */
+  const fullPeriod = CACHE.filter(inRange);           /* ไม่กรอง — ใช้ตรวจกับไฟล์ขนส่งเท่านั้น */
+  const closed = inPeriod.filter(x => x.m.status === 'CLOSED');
+  const pending = inPeriod.filter(x => x.m.status === 'OPEN');
+  const sum = arr => arr.reduce((s,x) => s + (x.c.amount || 0), 0);
+  const noVendor = inPeriod.filter(x => !x.m.vendor);
+  const vendorsN = new Set(inPeriod.map(x => x.m.vendor).filter(Boolean)).size;
+
+  /* ยอด "ไม่ตรงไฟล์" มีให้ดูเฉพาะรอบที่เพิ่งวาง/ตรวจไฟล์สรุป Period นั้นไว้ในเซสชันนี้เท่านั้น
+     (ไม่ได้เก็บถาวร) รอบอื่นจะโชว์ "ยังไม่ตรวจไฟล์" แทนเลข 0 กันเข้าใจผิดว่าตรงกันครบ */
+  let fileMismatch = null;
+  if(rcRows && rcRowsPeriodKey === periodKey){
+    const groups = buildReconcileCompare({list: fullPeriod});
+    fileMismatch = groups.reduce((s,g) => s + g.items.filter(x => x.cmp === 'mismatch').length, 0);
+  }
+
+  return {p, periodKey, n: inPeriod.length, amt: sum(inPeriod),
+    closedN: closed.length, closedAmt: sum(closed), pendingN: pending.length, pendingAmt: sum(pending),
+    noVendorN: noVendor.length, vendorsN, fileMismatch};
+}
+
+function activeFilterText(){
+  const parts = [];
+  if(F.carrier !== 'all') parts.push(`ขนส่ง ${F.carrier}`);
+  if(F.bu !== 'all') parts.push(`BU ${F.bu}`);
+  if(F.status !== 'all') parts.push(`สถานะ ${({open:'ยังไม่ปิด', breach:'เกิน 48 ชม.', flag:'ข้อมูลน่าสงสัย'})[F.status] || F.status}`);
+  if(F.vendor !== 'all') parts.push(`ซับ ${F.vendor === NOVENDOR ? 'ยังไม่ระบุซับ' : F.vendor}`);
+  if(F.q.trim()) parts.push(`ค้นหา "${F.q.trim()}"`);
+  return parts.length ? parts.join(' · ') : 'ไม่มีตัวกรอง (ดูทุกเคส)';
+}
+
+function renderSummaryView(){
+  const keys = Array.from({length:SUM_WINDOW}, (_, i) => shiftPeriod(SUM.anchorKey, -i));
+  const rows = keys.map(periodSummaryRow);
+  const fmtAmt = v => v.toLocaleString('th-TH', {minimumFractionDigits:2});
+  document.getElementById('count').textContent =
+    `รวม ${rows.reduce((s,r)=>s+r.n,0)} เคส ใน ${SUM_WINDOW} Period ที่แสดง`;
+
+  document.getElementById('summary').innerHTML = `
+    <div class="panel">
+      <div class="phead"><h3>สรุปราย Period</h3>
+        <span class="sp">
+          <button type="button" class="sm" id="sumPrev">‹ ย้อนหลัง ${SUM_WINDOW} รอบ</button>
+          <button type="button" class="sm" id="sumNow">Period ปัจจุบัน</button>
+          <button type="button" class="sm" id="sumNext">ไปข้างหน้า ${SUM_WINDOW} รอบ ›</button></span></div>
+      <div class="pbody" style="padding:12px 16px 0">
+        <p class="hint" style="margin:0">ตัวกรองตอนนี้: <b>${esc(activeFilterText())}</b> — เปลี่ยนได้จากแถบตัวกรองด้านบนเหมือนหน้าอื่น
+          ยกเว้นคอลัมน์ "ไม่ตรงไฟล์" ที่ไม่ถูกกรองตามนี้ เพราะเป็นการตรวจข้อมูลทั้งรอบเทียบไฟล์ขนส่ง ไม่ใช่มุมมองที่เลือกดู
+          กดที่แถวเพื่อดูรายละเอียด Period นั้นต่อในหน้า "นำเข้าสรุป Period"</p>
+      </div>
+      <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
+        <table style="min-width:980px"><thead><tr>
+          <th>Period</th><th style="text-align:right">จำนวนเคลม</th><th style="text-align:right">ยอดเงินรวม</th>
+          <th style="text-align:right">ปิดแล้ว</th><th style="text-align:right">ค้าง (Pending)</th>
+          <th style="text-align:right">ซับที่รับ</th><th>ยัง Unmatch</th></tr></thead><tbody>
+        ${rows.map(r => `<tr data-sumopen="${esc(r.periodKey)}">
+          <td class="mono">${esc(periodLabel(r.p))}</td>
+          <td class="r">${r.n}</td>
+          <td class="r">${fmtAmt(r.amt)}</td>
+          <td class="r">${r.closedN}<span class="sub">${fmtAmt(r.closedAmt)} บาท</span></td>
+          <td class="r">${r.pendingN}<span class="sub">${fmtAmt(r.pendingAmt)} บาท</span></td>
+          <td class="r">${r.vendorsN} ซับ</td>
+          <td>${r.noVendorN ? `<span class="chip warn">ไม่รู้ซับ ${r.noVendorN}</span>` : '<span class="chip ok">รู้ซับครบ</span>'}
+            ${r.fileMismatch == null ? '<span class="chip n">ยังไม่ตรวจไฟล์</span>'
+              : r.fileMismatch ? `<span class="chip bad">ไม่ตรงไฟล์ ${r.fileMismatch}</span>` : '<span class="chip ok">ตรงไฟล์ครบ</span>'}</td>
+        </tr>`).join('')}
+        </tbody></table>
+      </div>
+    </div>`;
+
+  document.getElementById('sumPrev').onclick = () => { SUM.anchorKey = shiftPeriod(SUM.anchorKey, -SUM_WINDOW); render(); };
+  document.getElementById('sumNext').onclick = () => { SUM.anchorKey = shiftPeriod(SUM.anchorKey, SUM_WINDOW); render(); };
+  document.getElementById('sumNow').onclick  = () => { SUM.anchorKey = periodOf(NOW()).key; render(); };
+  document.querySelectorAll('#summary [data-sumopen]').forEach(tr => tr.onclick = () => {
+    RC.periodKey = tr.dataset.sumopen;
+    setView('reconcile');
+  });
 }
