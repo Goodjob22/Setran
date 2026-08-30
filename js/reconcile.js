@@ -166,7 +166,9 @@ function renderReconcile(){
           ใช้จุดนี้ตรวจว่าที่คีย์รายวันไว้ครบกับไฟล์สรุปที่ขนส่งส่งมาไหม
           ถ้าเลขเคลมเดียวมีหลายบรรทัดสินค้า ระบบรวมเป็นเคสเดียวให้อัตโนมัติ (ยอดรวมกัน)
           แถวที่ไม่มีเลขเคลม (เช่น Reject claim / สาขายกเลิกเคลม) จะถูกข้ามไปเงียบ ๆ ไม่แสดงในตาราง
-          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ ยังไม่ระบุสาขา/ซับ (ไปเติมต่อได้ทีหลัง)
+          แถวที่นำเข้าใหม่จะสร้างเป็นเคสในระบบ — คอลัมน์ <b>ซับ</b> ในตารางเป็นแค่การเดาจากคอลัมน์ MK Transport
+          หรือคำในหมายเหตุ (ไม่แม่นทุกแถว) แสดงไว้ให้ดูก่อนเท่านั้น <b>ยังไม่ได้ตั้งซับให้เคสอัตโนมัติ</b>
+          ต้องไปยืนยัน/เลือกที่ตาราง "ตรวจสอบยอดตรงกัน" ด้านล่างหลังนำเข้าอีกที
           <b>วางไฟล์เดิมซ้ำได้เสมอ</b> — เคสที่มีอยู่แล้วจะไม่ถูกนำเข้าซ้ำ แต่ถ้าเคสไหนสาขา/ทะเบียน/พขร. ยังว่างอยู่
           (เช่น นำเข้าไว้ตั้งแต่ก่อนระบบอ่านคอลัมน์พวกนี้ได้) จะมีปุ่มให้เติมข้อมูลที่ขาดให้แยกต่างหาก
           โดยไม่แตะฟิลด์ที่มีค่าอยู่แล้ว</p>
@@ -230,6 +232,7 @@ function checkReconcileImport(){
 function parseReconcile(rows, cols){
   const get = (r, field) => cols[field] >= 0 ? (r[cols[field]] ?? '') : '';
   const hasItemCols = cols.code >= 0 || cols.name >= 0 || cols.qty >= 0;
+  const cand = vendorCandidates();
 
   /* รวมทุกบรรทัดของเลขเคลมเดียวกันเข้าด้วยกันก่อน — ไฟล์จริง 1 เคลมมีได้หลายบรรทัดสินค้า */
   const groups = new Map();
@@ -257,6 +260,15 @@ function parseReconcile(rows, cols){
       const td = extractTruckDriver(out_.note);
       if(td){ if(!out_.truck) out_.truck = td.truck; if(!out_.driver) out_.driver = td.driver; }
     }
+
+    /* เดาซับจากคอลัมน์ MK Transport ก่อน (ตรงตัว) ไม่งั้นลองหาคำในหมายเหตุ — แค่เดาไว้ให้ดูก่อนนำเข้า
+       ไม่ได้ใช้ตั้งค่าซับให้เคสอัตโนมัติ ต้องมายืนยัน/เลือกเองที่ตาราง "ตรวจสอบยอดตรงกัน" หลังนำเข้าอีกที */
+    out_.vendor = null; out_.vendorSrc = '';
+    const byMk = out_.mkTransport ? matchVendorExact(out_.mkTransport, cand) : null;
+    const byNote = matchVendorInText(out_.note, cand);
+    if(byMk && byNote && byMk !== byNote){ out_.vendor = byMk; out_.vendorSrc = `MK Transport (หมายเหตุกลับชี้ ${byNote})`; }
+    else if(byMk){ out_.vendor = byMk; out_.vendorSrc = 'MK Transport'; }
+    else if(byNote){ out_.vendor = byNote; out_.vendorSrc = 'เดาจากหมายเหตุ'; }
 
     /* ยอด: รวม Ex_vat/Vat/Net_amt ของทุกบรรทัดสินค้าในเลขเคลมนี้ */
     for(const r of grp){
@@ -342,7 +354,6 @@ function buildReconcileCompare(R){
   for(const x of R.list) sysById.set(x.c.id.toUpperCase(), x);
   const fileById = new Map();
   for(const r of rcRows) fileById.set(r.id.toUpperCase(), r);
-  const cand = vendorCandidates();
 
   const rows = [];
   for(const key of new Set([...sysById.keys(), ...fileById.keys()])){
@@ -353,13 +364,7 @@ function buildReconcileCompare(R){
       : sys ? 'sysonly' : 'fileonly';
 
     let vendor = sys ? sys.m.vendor : null, vendorSrc = vendor ? 'ระบบ' : '';
-    if(!vendor && file){
-      const byMk = file.mkTransport ? matchVendorExact(file.mkTransport, cand) : null;
-      const byNote = matchVendorInText(file.note, cand);
-      if(byMk && byNote && byMk !== byNote){ vendor = byMk; vendorSrc = `MK Transport (หมายเหตุกลับชี้ ${esc(byNote)})`; }
-      else if(byMk){ vendor = byMk; vendorSrc = 'MK Transport'; }
-      else if(byNote){ vendor = byNote; vendorSrc = 'เดาจากหมายเหตุ'; }
-    }
+    if(!vendor && file && file.vendor){ vendor = file.vendor; vendorSrc = file.vendorSrc; }
     /* เลือกได้เฉพาะเคลมที่มีเคสในระบบจริงแล้ว และยังไม่ได้ปิด+ออก Memo ครบ — เอาไว้เลือกปิดเคส/ออก Memo
        ต่อจากตารางนี้ได้เลย โดยไม่ต้องสลับไปหน้ากระดาน (ใช้ Set ตัวเลือกร่วมกับหน้ากระดาน) */
     const pickable = !!sys && (sys.m.status === 'OPEN' || (sys.m.status === 'CLOSED' && !sys.m.memoNo));
@@ -419,7 +424,7 @@ function renderReconcileCompare(groups){
               <td class="mono">${esc(x.id)}</td>
               <td class="r">${fmtAmt(x.sysAmt)}</td>
               <td class="r">${fmtAmt(x.fileAmt)}</td>
-              <td style="font-size:12px">${x.vendorSrc || ''}</td>
+              <td style="font-size:12px">${esc(x.vendorSrc || '')}</td>
               <td>${cmpChip(x.cmp)}</td></tr>`).join('')}
             </tbody></table></div>`).join('')}
       </div>
@@ -442,8 +447,8 @@ function showReconcilePreview(){
   const reimportable = rcRows.filter(r => r.reimportId);
   for(const id of [...rcReimportSelect]) if(!reimportable.some(r => r.reimportId === id)) rcReimportSelect.delete(id);
   document.getElementById('rcPreview').innerHTML = `
-    <div class="tw" style="margin-top:14px"><table style="min-width:1240px"><thead><tr>
-      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th><th>พขร.</th><th>สาเหตุ</th>
+    <div class="tw" style="margin-top:14px"><table style="min-width:1340px"><thead><tr>
+      <th>#</th><th>เลขเคลม</th><th>ขนส่ง</th><th>วันที่รับเมล</th><th>สาขา</th><th>ทะเบียน</th><th>พขร.</th><th>ซับ</th><th>สาเหตุ</th>
       <th style="text-align:right">รายการ</th><th style="text-align:right">Ex_vat</th>
       <th style="text-align:right">VAT</th><th style="text-align:right">Net_amt</th><th>ผลตรวจ</th></tr></thead><tbody>
       ${rcRows.slice(0, 300).map(r => `<tr style="cursor:default">
@@ -454,6 +459,7 @@ function showReconcilePreview(){
         <td>${esc(r.store || '—')}</td>
         <td class="mono">${esc(r.truck || '—')}</td>
         <td>${esc(r.driver || '—')}</td>
+        <td style="font-size:12px">${r.vendor ? `${esc(r.vendor)}<span class="hint" style="display:block">${esc(r.vendorSrc)}</span>` : '—'}</td>
         <td style="font-size:12px">${esc(r.reason || '—')}</td>
         <td class="r">${r.items.length || '—'}</td>
         <td class="r">${r.exVat ? r.exVat.toLocaleString('th-TH', {minimumFractionDigits:2}) : '—'}</td>
