@@ -529,13 +529,16 @@ async function applyBackfill(){
   const rows = rcRows.filter(r => r.backfill);
   if(!rows.length) return;
   let updated = 0, failed = 0;
-  for(const r of rows){
-    try{
-      const j = await API.patchCase(r.backfillId, r.backfill);
-      S.cases[r.backfillId] = j.case;
-      updated++;
-    }catch(e){ failed++; }
-  }
+  suspendLive();
+  try{
+    for(const r of rows){
+      try{
+        const j = await API.patchCase(r.backfillId, r.backfill);
+        S.cases[r.backfillId] = j.case;
+        updated++;
+      }catch(e){ failed++; }
+    }
+  } finally { resumeLive(); }
   render();
   toast(`เติมข้อมูลที่ขาดแล้ว ${updated} เคส${failed ? ` · ${failed} รายการไม่สำเร็จ` : ''}`);
 }
@@ -549,15 +552,18 @@ async function applyReimport(){
   if(!confirm(`ลบเคสเดิม ${ids.length} เคส แล้วสร้างใหม่จากไฟล์นี้?\n\nระบบเลือกมาให้เฉพาะเคสที่ยังเปิดอยู่ (ยังไม่ปิด ไม่มีเลข Memo) เท่านั้น เคสที่ทำงานต่อแล้วจะไม่ถูกลบแน่นอน\n\nลบแล้วลบถาวร ไทม์ไลน์เดิมของเคสที่ลบจะหายไปด้วย (จะสร้างไทม์ไลน์ใหม่จากไฟล์แทน)`)) return;
   const rows = rcRows.filter(r => ids.includes(r.reimportId));
   let done = 0, failed = 0;
-  for(const r of rows){
-    try{
-      await API.delCase(r.reimportId);
-      delete S.cases[r.reimportId]; delete S.events[r.reimportId]; boardSelect.delete(r.reimportId);
-      const j = await API.addCase(buildCaseRecord(r, 'นำเข้าใหม่แทนเคสเดิมที่ข้อมูลไม่ครบ (ไม่มีทะเบียนรถ)'));
-      S.cases[r.id] = j.case;
-      done++;
-    }catch(e){ failed++; }
-  }
+  suspendLive();
+  try{
+    for(const r of rows){
+      try{
+        await API.delCase(r.reimportId);
+        delete S.cases[r.reimportId]; delete S.events[r.reimportId]; boardSelect.delete(r.reimportId);
+        const j = await API.addCase(buildCaseRecord(r, 'นำเข้าใหม่แทนเคสเดิมที่ข้อมูลไม่ครบ (ไม่มีทะเบียนรถ)'));
+        S.cases[r.id] = j.case;
+        done++;
+      }catch(e){ failed++; }
+    }
+  } finally { resumeLive(); }
   const st = await API.state();
   S.events = st.events;
   rcReimportSelect.clear();
@@ -579,15 +585,18 @@ async function applyReconcileImport(){
   const good = rcRows.filter(r => r.status !== 'skip');
   let added = 0, failed = 0;
   const importedIds = [];
-  for(const r of good){
-    const rec = buildCaseRecord(r);
-    try{
-      const j = await API.addCase(rec);
-      S.cases[r.id] = j.case;
-      added++;
-      importedIds.push(r.id);
-    }catch(e){ failed++; }
-  }
+  suspendLive();
+  try{
+    for(const r of good){
+      const rec = buildCaseRecord(r);
+      try{
+        const j = await API.addCase(rec);
+        S.cases[r.id] = j.case;
+        added++;
+        importedIds.push(r.id);
+      }catch(e){ failed++; }
+    }
+  } finally { resumeLive(); }
   const st = await API.state();
   S.events = st.events;
   rcImported = true;
@@ -601,10 +610,13 @@ async function undoLastImport(){
   if(!rcLastImport.length) return;
   if(!confirm(`ลบเคสที่นำเข้ารอบล่าสุดทั้งหมด ${rcLastImport.length} เคส?\n\nลบแล้วลบถาวร รวมประวัติ/บันทึกใด ๆ ที่เพิ่มเข้าไปหลังนำเข้า (เช่น ทำเครื่องหมายรับเคลม หรือใส่เลข Memo ไปแล้ว) ก็จะหายไปด้วย`)) return;
   let removed = 0;
-  for(const id of rcLastImport){
-    try{ await API.delCase(id); delete S.cases[id]; delete S.events[id]; boardSelect.delete(id); removed++; }
-    catch(e){}
-  }
+  suspendLive();
+  try{
+    for(const id of rcLastImport){
+      try{ await API.delCase(id); delete S.cases[id]; delete S.events[id]; boardSelect.delete(id); removed++; }
+      catch(e){}
+    }
+  } finally { resumeLive(); }
   rcLastImport = [];
   render();
   toast(`ลบเคสที่นำเข้าไว้แล้ว ${removed} เคส`);

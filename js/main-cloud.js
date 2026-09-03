@@ -99,8 +99,11 @@ document.getElementById('mMark').onclick = async () => {
   const b = document.getElementById('mMark');
   const ids = (b.dataset.ids || '').split(',').filter(Boolean);
   const at = isoLocal(NOW());
-  for(const id of ids)
-    await addEvent(id, {at, type:'FOLLOWUP', vendor:b.dataset.v, text:'ส่งเมลติดตามงานแล้ว'});
+  suspendLive();
+  try{
+    for(const id of ids)
+      await addEvent(id, {at, type:'FOLLOWUP', vendor:b.dataset.v, text:'ส่งเมลติดตามงานแล้ว'});
+  } finally { resumeLive(); }
   toast(`บันทึกแล้ว ${ids.length} เคส`);
   const dlg = document.getElementById('mdlg');
   dlg.close();

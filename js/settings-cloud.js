@@ -113,16 +113,19 @@ function renderSettings(){
       try{
         const d = JSON.parse(String(r.result));
         let nv = 0, nt = 0, nc = 0;
-        for(const v of (d.vendors || [])){ await API.putVendor(v.code, v); nv++; }
-        if((d.trucks || []).length){ await API.importTrucks(d.trucks); nt = d.trucks.length; }
-        for(const c of (d.cases || [])){
-          const ev = c.events || [];
-          if(S.cases[c.id]) await API.patchCase(c.id, c);
-          else { await API.addCase({...c, events:ev}); nc++; continue; }
-          for(const x of ev) if(!(S.events[c.id]||[]).some(y => y.at === x.at && y.type === x.type))
-            await API.addEvent(c.id, x);
-        }
-        if(d.settings) await API.putSettings({...S.settings, ...d.settings});
+        suspendLive();
+        try{
+          for(const v of (d.vendors || [])){ await API.putVendor(v.code, v); nv++; }
+          if((d.trucks || []).length){ await API.importTrucks(d.trucks); nt = d.trucks.length; }
+          for(const c of (d.cases || [])){
+            const ev = c.events || [];
+            if(S.cases[c.id]) await API.patchCase(c.id, c);
+            else { await API.addCase({...c, events:ev}); nc++; continue; }
+            for(const x of ev) if(!(S.events[c.id]||[]).some(y => y.at === x.at && y.type === x.type))
+              await API.addEvent(c.id, x);
+          }
+          if(d.settings) await API.putSettings({...S.settings, ...d.settings});
+        } finally { resumeLive(); }
         await pullState(); render();
         toast(`กู้คืนแล้ว — ซับ ${nv} · ทะเบียน ${nt} · เคสใหม่ ${nc}`);
       }catch(err){ toast('กู้คืนไม่สำเร็จ: ' + err.message); }

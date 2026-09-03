@@ -115,8 +115,11 @@ async function bulkAccept(){
   if(!withVendor.length){ toast('เคสที่เลือกยังไม่รู้ว่าซับไหนถืออยู่ ต้องระบุซับก่อนถึงจะทำเครื่องหมายรับเคลมได้'); return; }
   if(noVendor.length && !confirm(`มี ${noVendor.length} เคสที่ยังไม่รู้ว่าซับไหนถืออยู่ จะข้ามไปก่อน\n\nทำเครื่องหมายรับเคลมให้ ${withVendor.length} เคสที่เหลือ ต่อไหม?`)) return;
   const at = isoLocal(NOW());
-  for(const {c,m} of withVendor)
-    await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  suspendLive();
+  try{
+    for(const {c,m} of withVendor)
+      await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  } finally { resumeLive(); }
   toast(`ทำเครื่องหมายซับรับเคลมแล้ว ${withVendor.length} เคส${noVendor.length?` · ข้าม ${noVendor.length} เคส (ไม่รู้ซับ)`:''}`);
 }
 
@@ -138,6 +141,7 @@ async function autoFillKnownVendors(){
   if(!all.length) return;
   const sel = all.slice(0, 20);
   autoFillBusy = true;
+  suspendLive();
   try{
     const at = isoLocal(NOW());
     for(const x of sel){
@@ -148,6 +152,7 @@ async function autoFillKnownVendors(){
     toast(`ตั้งซับอัตโนมัติให้แล้ว ${sel.length} เคส (ทะเบียนที่รู้จักซับชัดเจน)`);
     if(F.view !== 'entry' && F.view !== 'settings') render();
   } finally {
+    resumeLive();
     autoFillBusy = false;
     if(all.length > sel.length) setTimeout(autoFillKnownVendors, 45000);
   }
@@ -200,8 +205,11 @@ function openMemoAssign(){
     ev.preventDefault();
     const no = document.getElementById('memoNo').value.trim();
     if(!no) return;
-    for(const id of ids)
-      await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    suspendLive();
+    try{
+      for(const id of ids)
+        await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    } finally { resumeLive(); }
     boardSelect.clear();
     document.getElementById('pdlg').close();
     render();
