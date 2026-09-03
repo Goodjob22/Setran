@@ -250,8 +250,23 @@ const API = {
   delUser: id => run('ลบผู้ใช้', () => SB.from('profiles').delete().eq('id', id)),
 };
 
-/* ---------- โหลดข้อมูลทั้งก้อน ---------- */
-async function pullState(){
+/* ---------- โหลดข้อมูลทั้งก้อน ----------
+   กันเรียกซ้อนกัน (สำคัญมาก): ถ้าดึงข้อมูลรอบใหม่เริ่มไปแล้วระหว่างที่กำลังพิมพ์/บันทึกอะไรบางอย่าง
+   อยู่ในเครื่อง (เช่น กด "ทำเครื่องหมายรับเคลม" ทีละหลายเคส) รอบที่ดึงไปตั้งแต่ก่อนหน้านั้นอาจได้ข้อมูล
+   เก่ากว่ากลับมา แต่ทำงานเสร็จ (resolve) ทีหลัง — ถ้าปล่อยให้ทั้งสองรอบเขียนทับ S.events กันเองแบบ
+   ไม่มีลำดับ รอบเก่าที่จบทีหลังจะเขียนทับข้อมูลที่เพิ่งบันทึกไปทิ้ง ทำให้เคสที่เพิ่งปิดไปแล้ว "เด้งกลับ"
+   เป็นเปิดอยู่เหมือนเดิม (บั๊กที่เจอจริงตอนกดรับเคลมทีละหลายสิบเคสพร้อมกัน) จึงต้องให้ดึงได้ทีละรอบ
+   เท่านั้น ถ้ามีคนเรียกซ้อนเข้ามาระหว่างที่กำลังดึงอยู่ ให้รอรอบที่กำลังทำอยู่ให้เสร็จ แล้วค่อยดึงซ้ำอีกทีเดียว */
+let pullInFlight = null, pullQueued = false;
+function pullState(){
+  if(pullInFlight){ pullQueued = true; return pullInFlight; }
+  pullInFlight = doPullState().finally(() => {
+    pullInFlight = null;
+    if(pullQueued){ pullQueued = false; pullState(); }
+  });
+  return pullInFlight;
+}
+async function doPullState(){
   setConn('busy', 'กำลังโหลดข้อมูล…');
   const uid = (await SB.auth.getUser()).data.user?.id || '00000000-0000-0000-0000-000000000000';
   const [cases, events, vendors, trucks, evid, setg, prof] = await Promise.all([
@@ -284,17 +299,29 @@ async function pullState(){
   return S;
 }
 
-/* ---------- อัปเดตสด : คนอื่นแก้ แล้วหน้าเราขยับตาม ---------- */
+/* ---------- อัปเดตสด : คนอื่นแก้ แล้วหน้าเราขยับตาม ----------
+   ตอนกำลังบันทึกหลายเคสพร้อมกันเอง (เช่น กด "ทำเครื่องหมายรับเคลม" ทีละหลายสิบเคส) ห้ามให้รอบดึงข้อมูล
+   สดตรงนี้แทรกเข้ามากลางคัน — ถ้าแทรก มันจะอ่านฐานข้อมูล ณ ตอนที่ยังบันทึกไม่ครบทุกเคส แล้วเอาผลนั้นมา
+   เขียนทับข้อมูลในเครื่องทิ้ง ทำให้เคสที่เพิ่งกดปิดไปแล้วก่อนหน้านั้นในชุดเดียวกัน "เด้งกลับ" เป็นเปิดอยู่
+   เหมือนเดิม (บั๊กที่เจอจริง) โค้ดที่บันทึกหลายเคสพร้อมกันจึงต้องเรียก suspendLive() คร่อมช่วงที่กำลังวน
+   บันทึก แล้วเรียก resumeLive() ตอนจบ — พอปล่อยแล้วจะดึงรอบล่าสุดให้ทันทีอีกทีให้ชัวร์ */
 let liveTimer = null;
+let liveSuspendCount = 0;
+function suspendLive(){ liveSuspendCount++; clearTimeout(liveTimer); }
+function resumeLive(){
+  liveSuspendCount = Math.max(0, liveSuspendCount - 1);
+  if(liveSuspendCount === 0) bump();
+}
+function bump(){
+  if(liveSuspendCount > 0) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    try{ await pullState(); if(typeof render === 'function') render(); }catch(e){}
+  }, 1200);
+}
 function startLive(){
   SB.channel('claim-live')
     .on('postgres_changes', { event:'*', schema:'public', table:'cases' },  bump)
     .on('postgres_changes', { event:'*', schema:'public', table:'events' }, bump)
     .subscribe();
-  function bump(){
-    clearTimeout(liveTimer);
-    liveTimer = setTimeout(async () => {
-      try{ await pullState(); if(typeof render === 'function') render(); }catch(e){}
-    }, 1200);
-  }
 }

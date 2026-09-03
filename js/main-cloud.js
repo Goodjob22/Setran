@@ -10,10 +10,13 @@ function setView(v){
 
 function render(){
   recompute();
+  /* แถบเลือกหลายเคส (ทำเครื่องหมายซับรับเคลม/ใส่เลข Memo) ใช้ร่วมกันได้ทุกแท็บ ไม่ใช่แค่หน้ากระดาน
+     เช่น เลือกจากตารางเทียบยอดในหน้า "นำเข้าสรุป Period" ก็ได้ จึงต้องอัปเดตทุกครั้งที่ render ไม่ใช่แค่ตอนอยู่หน้ากระดาน */
+  renderMemoBar();
   const isCase = ['board','queue','memo'].includes(F.view);
   document.getElementById('vsec').hidden = !isCase;
   document.getElementById('alert').hidden = !isCase;
-  document.getElementById('filterBar').hidden = !isCase && F.view !== 'fleet';
+  document.getElementById('filterBar').hidden = !isCase && F.view !== 'fleet' && F.view !== 'summary';
   /* สถานะ (ยังไม่ปิด/เกิน 48 ชม./ปิดแล้ว/ข้อมูลน่าสงสัย) มีความหมายเฉพาะหน้ากระดาน/คิว — หน้า Memo มีตัวกรอง
      "ขอบเขต" ของตัวเองอยู่แล้ว (เคสค้าง/เคสสำเร็จ) ส่วนหน้าทะเบียนรถไม่มีสถานะเคสรายทะเบียน จึงซ่อนแถบนี้ไว้
      กันสับสนว่ากดแล้วทำไมไม่มีผล */
@@ -31,10 +34,11 @@ function render(){
   buSeg.querySelectorAll('button').forEach(b => b.onclick = () => { F.bu = b.dataset.bu; render(); });
 
   if(isCase) { renderAlert(); renderVendorStrip(); }
-  for(const v of ['board','queue','entry','reconcile','fleet','vendors','memo','dashboard','settings'])
+  for(const v of ['board','queue','entry','reconcile','summary','close','fleet','vendors','memo','dashboard','settings'])
     document.getElementById(v).hidden = F.view !== v;
-  ({board:renderTable, queue:renderQueue, entry:renderEntry, reconcile:renderReconcile, fleet:renderFleet,
-    vendors:renderVendorsView, memo:renderMemo, dashboard:renderDashboard, settings:renderSettings})[F.view]();
+  ({board:renderTable, queue:renderQueue, entry:renderEntry, reconcile:renderReconcile, summary:renderSummaryView,
+    close:renderPeriodClose, fleet:renderFleet, vendors:renderVendorsView, memo:renderMemo,
+    dashboard:renderDashboard, settings:renderSettings})[F.view]();
 
   document.getElementById('orgTag').textContent = S.settings.orgName || 'DHL · CJ';
   const mine = allCases().filter(c => c.source && c.source !== 'seed' && c.source !== 'import' && c.source !== 'reconcile').length;
@@ -95,8 +99,11 @@ document.getElementById('mMark').onclick = async () => {
   const b = document.getElementById('mMark');
   const ids = (b.dataset.ids || '').split(',').filter(Boolean);
   const at = isoLocal(NOW());
-  for(const id of ids)
-    await addEvent(id, {at, type:'FOLLOWUP', vendor:b.dataset.v, text:'ส่งเมลติดตามงานแล้ว'});
+  suspendLive();
+  try{
+    for(const id of ids)
+      await addEvent(id, {at, type:'FOLLOWUP', vendor:b.dataset.v, text:'ส่งเมลติดตามงานแล้ว'});
+  } finally { resumeLive(); }
   toast(`บันทึกแล้ว ${ids.length} เคส`);
   const dlg = document.getElementById('mdlg');
   dlg.close();
@@ -134,6 +141,10 @@ async function startApp(){
     document.getElementById('main').hidden = false;
     render();
     startLive();
+    /* เติมซับให้เคสที่ทะเบียนชี้ไปซับเดียวชัดเจนอยู่แล้ว — รันครั้งเดียวตอนเปิดแอปเสร็จ ไม่ผูกกับ render()
+       เพราะ render() ถูกเรียกถี่มาก (ทุกครั้งที่สลับแท็บ/พิมพ์ค้นหา/ทุก 60 วิ) ถ้าผูกไว้แล้วมีเคสค้างเยอะ
+       จะยิงคำสั่งบันทึกเป็นชุด ๆ ต่อเนื่องไม่หยุด ทำให้ตัวบอกสถานะ "กำลังบันทึก" ติดค้างและกดดันฐานข้อมูลเกินจำเป็น */
+    autoFillKnownVendors();
   }catch(e){
     document.getElementById('app').hidden = false;
     document.getElementById('app').innerHTML =

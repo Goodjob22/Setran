@@ -38,6 +38,9 @@ function renderVendorStrip(){
     if(x.status === 'CLOSED'){ s.closed++; s.sum += x.el; s.n++; }
     m.set(v, s);
   }
+  /* ซับที่มีในระบบแต่ยังไม่มีเคสเลย (เพิ่งเพิ่มใหม่) ก็ต้องมีการ์ดให้กดกรองได้เหมือนกัน
+     ไม่งั้นการ์ดจะโผล่มาก็ต่อเมื่อมีเคสแรกเข้ามาแล้วเท่านั้น */
+  for(const v of vendorNames(true)) if(!m.has(v)) m.set(v, {v, open:0, breach:0, closed:0, sum:0, n:0});
   const st = [...m.values()].sort((a,b) => (b.open+b.closed) - (a.open+a.closed));
   const total = list.length;
   const tOpen = list.filter(x => x.m.status === 'OPEN').length;
@@ -112,9 +115,47 @@ async function bulkAccept(){
   if(!withVendor.length){ toast('เคสที่เลือกยังไม่รู้ว่าซับไหนถืออยู่ ต้องระบุซับก่อนถึงจะทำเครื่องหมายรับเคลมได้'); return; }
   if(noVendor.length && !confirm(`มี ${noVendor.length} เคสที่ยังไม่รู้ว่าซับไหนถืออยู่ จะข้ามไปก่อน\n\nทำเครื่องหมายรับเคลมให้ ${withVendor.length} เคสที่เหลือ ต่อไหม?`)) return;
   const at = isoLocal(NOW());
-  for(const {c,m} of withVendor)
-    await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  suspendLive();
+  try{
+    for(const {c,m} of withVendor)
+      await addEvent(c.id, {at, type:'ACCEPT', vendor:m.vendor, text:'ทำเครื่องหมายซับรับเคลม (เลือกหลายเคสพร้อมกัน)'});
+  } finally { resumeLive(); }
   toast(`ทำเครื่องหมายซับรับเคลมแล้ว ${withVendor.length} เคส${noVendor.length?` · ข้าม ${noVendor.length} เคส (ไม่รู้ซับ)`:''}`);
+}
+
+/* เติมซับให้เคสที่ยังไม่รู้ว่าเป็นของซับไหน แต่ทะเบียนชี้ไปที่ซับเดียวชัดเจน (เคยรับเคลม/ตั้งซับสัมปทานไว้)
+   ไม่แตะเคสที่ทะเบียนชี้ไปหลายซับพร้อมกัน (bestGuess คืน null) และไม่แตะเคสที่ปิดแล้วเด็ดขาด (เปิดเคสที่ปิดแล้ว
+   ขึ้นมาใหม่โดยไม่มีใครขอ อันตรายกว่าประโยชน์ที่ได้) ใช้ CACHE ทั้งก้อนไม่กรองตาม Slicer เพราะเป็นงานหลังบ้าน
+
+   เรียกจาก startApp() ครั้งเดียวตอนเปิดแอปเสร็จเท่านั้น — ห้ามผูกกับ render() เด็ดขาด เพราะ render() ถูก
+   เรียกถี่มาก (ทุกครั้งที่สลับแท็บ/พิมพ์ค้นหา/ทุก 60 วิ) เคยลองผูกไว้แล้วพบว่าถ้ามีเคสค้างเยอะ ระบบจะยิงคำสั่ง
+   บันทึกเป็นชุด ๆ ต่อเนื่องไม่หยุด (render() จบชุดหนึ่งก็เรียกอันนี้ใหม่ วนไม่จบ) จนตัวบอกสถานะ "กำลังบันทึก"
+   ติดค้างและกดดันฐานข้อมูลเกินจำเป็น — ตอนนี้ทำทีละชุดเล็ก ๆ (20) แล้วถ้ายังเหลือ ค่อยนัดรันซ้ำห่าง ๆ (45 วิ)
+   เอง ไม่ใช่รันต่อทันที ให้เวลาระบบพักระหว่างชุดเสมอ */
+let autoFillBusy = false;
+async function autoFillKnownVendors(){
+  if(autoFillBusy) return;
+  if(F.view === 'entry' || F.view === 'settings') return;
+  const all = CACHE.filter(({m}) => m.status === 'OPEN' && !m.vendor)
+    .map(x => ({...x, g: bestGuess(x.c)})).filter(x => x.g);
+  if(!all.length) return;
+  const sel = all.slice(0, 20);
+  autoFillBusy = true;
+  suspendLive();
+  try{
+    const at = isoLocal(NOW());
+    for(const x of sel){
+      const j = await API.addEvent(x.c.id, {at, type:'FORWARD', vendor:x.g.vendor,
+        text:`ตั้งซับอัตโนมัติจากทะเบียนที่ระบบรู้จักแล้ว (${x.g.why})`});
+      (S.events[x.c.id] ||= []).push(j.event);
+    }
+    toast(`ตั้งซับอัตโนมัติให้แล้ว ${sel.length} เคส (ทะเบียนที่รู้จักซับชัดเจน)`);
+    if(F.view !== 'entry' && F.view !== 'settings') render();
+  } finally {
+    resumeLive();
+    autoFillBusy = false;
+    if(all.length > sel.length) setTimeout(autoFillKnownVendors, 45000);
+  }
 }
 
 function renderTable(){
@@ -164,8 +205,11 @@ function openMemoAssign(){
     ev.preventDefault();
     const no = document.getElementById('memoNo').value.trim();
     if(!no) return;
-    for(const id of ids)
-      await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    suspendLive();
+    try{
+      for(const id of ids)
+        await addEvent(id, {at:isoLocal(NOW()), type:'MEMO', vendor:null, text:no});
+    } finally { resumeLive(); }
     boardSelect.clear();
     document.getElementById('pdlg').close();
     render();
@@ -262,7 +306,6 @@ function renderQueue(){
     </div>`;
   }).join('');
   bindUnknown(el);
-  el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
   el.querySelectorAll('[data-mail]').forEach(b => b.onclick = () => openMail(b.dataset.mail));
   el.querySelectorAll('[data-sent]').forEach(cb => cb.onchange = async () => {
     const id = cb.dataset.sent;
@@ -305,6 +348,36 @@ function openCase(id){
       <div class="kv"><div class="k">สาเหตุ</div><div class="v">${esc(c.reason||'—')}</div></div>
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
+
+    ${(c.items||[]).length ? `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${c.items.length} รายการ)</div>
+    <div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
+      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
+      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
+      ${c.items.map(it => `<tr style="cursor:default">
+        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
+        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
+        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+
+    <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร. / ซับ</legend>
+      <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด — เปลี่ยนซับที่นี่จะบันทึกเป็นบันทึกเหตุการณ์ "ส่งเมลให้ซับ" ให้อัตโนมัติ</p>
+      <form id="fLoc" novalidate><div class="frow">
+        <div class="fld" style="max-width:150px"><label for="lStore">รหัสสาขา</label>
+          <input type="text" id="lStore" autocomplete="off" list="lStoreList" value="${esc(c.store||'')}">
+          <datalist id="lStoreList">${storeOptions().map(([id])=>`<option value="${esc(id)}">`).join('')}</datalist></div>
+        <div class="fld" style="max-width:200px"><label for="lStoreName">ชื่อสาขา</label>
+          <input type="text" id="lStoreName" autocomplete="off" value="${esc(c.store_name||'')}"></div>
+        <div class="fld" style="max-width:150px"><label for="lTruck">ทะเบียนรถ</label>
+          <input type="text" id="lTruck" autocomplete="off" value="${esc(c.truck||'')}"></div>
+        <div class="fld" style="max-width:200px"><label for="lDriver">ชื่อ พขร.</label>
+          <input type="text" id="lDriver" autocomplete="off" list="lDriverList" value="${esc(c.driver||'')}">
+          <datalist id="lDriverList"></datalist></div>
+        <div class="fld" style="max-width:200px"><label for="lVendor">ซับ</label>
+          <select id="lVendor"><option value="">— ไม่ระบุ —</option>
+            ${vOpts.map(v=>`<option ${v===m.vendor?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
+      </div>
+      <div class="actions"><button type="submit">บันทึก</button></div></form>
+    </fieldset>
 
     <div class="slaband">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -469,6 +542,29 @@ function openCase(id){
     await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
     c.amount = net; c.ex_vat = ex; c.vat = vat;
     render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
+  const lDriverList = document.getElementById('lDriverList');
+  if(lDriverList) lDriverList.innerHTML = [...driverMap().values()]
+    .sort((a, b) => b.cases.length - a.cases.length)
+    .map(d => `<option value="${esc(d.display)}">`).join('');
+  document.getElementById('fLoc').onsubmit = async ev => {
+    ev.preventDefault();
+    const storeRaw = document.getElementById('lStore').value.trim();
+    const found = storeRaw ? findStore(storeRaw) : null;
+    const store_ = found ? found[0] : storeRaw;
+    const storeName = document.getElementById('lStoreName').value.trim() || (found ? found[1] : '');
+    const truck = document.getElementById('lTruck').value.trim();
+    const driver = document.getElementById('lDriver').value.trim();
+    const newVendor = document.getElementById('lVendor').value;
+    if(newVendor && newVendor !== m.vendor){
+      if(m.status === 'CLOSED' &&
+         !confirm(`เคส ${c.id} ปิดแล้ว — เปลี่ยนซับจะนับว่าส่งงานต่อ และเปิดเคสขึ้นมานับเวลาใหม่\n\nยืนยันเปลี่ยนซับเป็น "${newVendor}"?`)) return;
+      await addEvent(c.id, {at:isoLocal(NOW()), type:'FORWARD', vendor:newVendor,
+        text:`ส่งเมลให้ซับ ${newVendor} (แก้ไขจากหน้าเคส)`});
+    }
+    await API.patchCase(c.id, {store:store_, store_name:storeName, truck, driver});
+    c.store = store_; c.store_name = storeName; c.truck = truck; c.driver = driver;
+    render(); openCase(c.id); toast('บันทึกสาขา/ทะเบียน/พขร./ซับ แล้ว');
   };
   document.getElementById('dMail').onclick = () => { dlg.close(); openMail(m.vendor, [c.id]); };
   const dm = document.getElementById('dMemo');
@@ -646,28 +742,36 @@ function renderUnknownPanel(){
   return `<div class="qgroup" id="unkPanel">
     <div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
       <span class="chip ${list.length ? 'warn' : 'ok'}">${list.length} เคสค้าง</span>
-      <span class="sp">${groups.length
-        ? `<button type="button" class="sm pri" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
+      <span class="sp">
+        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
 
     <div class="pbody" style="padding:12px 16px 0">
       <p class="hint" style="margin:0">ระบบไล่หาเจ้าของจากหลักฐานที่มี — ทะเบียนที่เคยรับเคลม
         ชื่อคนขับ และรายชื่อรถที่ซับแจ้งไว้ แล้วเสนอเป็น<b>ผู้ต้องสงสัย</b>
-        เคสหนึ่งมีได้หลายราย เพราะเป้าหมายคือไล่ถามให้ครบ ไม่ใช่ตัดสินแทน</p>
+        เคสหนึ่งมีได้หลายราย เพราะเป้าหมายคือไล่ถามให้ครบ ไม่ใช่ตัดสินแทน
+        เคสที่ทะเบียนชี้ไปซับเดียวชัดเจน (ไม่มีคนอื่นเสมอ) ระบบตั้งซับให้อัตโนมัติแล้วตั้งแต่โหลดหน้า
+        จึงเหลือแต่เคสที่ยังไม่แน่ใจให้ไล่ถามในนี้</p>
     </div>
 
     <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
-      <table style="min-width:900px"><thead><tr>
-        <th>เลขเคลม</th><th>ทะเบียน · พขร.</th><th>ค้างมาแล้ว</th>
-        <th>ผู้ต้องสงสัย</th><th>รู้มาจากไหน</th></tr></thead><tbody>
+      <table style="min-width:1020px"><thead><tr>
+        <th>เลขเคลม</th><th>ทะเบียน · พขร.</th><th style="text-align:right">ยอดเงิน</th><th>ค้างมาแล้ว</th>
+        <th>ผู้ต้องสงสัย</th><th>รู้มาจากไหน</th><th></th></tr></thead><tbody>
       ${list.map(({c, m, guess}) => `<tr data-open="${esc(c.id)}">
         <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
         <td>${esc(c.truck || '—')}<span class="sub">${esc(c.driver || 'ไม่มีชื่อ พขร.')}</span></td>
+        <td class="r">${c.amount ? baht(c.amount) : '—'}</td>
         <td class="mono" style="color:var(--bad)">${m.remain < 0 ? 'เกิน ' + hrs(-m.remain) : hrs(m.remain)}</td>
         <td>${guess.length
             ? guess.map(g => `<span class="chip ${g.tier <= 2 ? 'ok' : 'a'}">${esc(g.vendor)}</span>`).join(' ')
             : '<span class="chip bad">ไม่มีเบาะแส</span>'}</td>
         <td class="sub">${guess.length ? esc(guess[0].why) : 'ไม่มีทั้งประวัติ ชื่อคนขับ และรายชื่อรถ'}</td>
-      </tr>`).join('')}
+        <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+      </tr>
+      <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="7" style="padding:0 0 10px">
+        <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+        <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+      </td></tr>`).join('')}
       </tbody></table>
     </div>
 
@@ -680,11 +784,13 @@ function renderUnknownPanel(){
       </div></div>` : ''}
 
     ${none.length ? `<div class="pbody" style="padding:0 16px 14px">
-      <div class="warnbox"><b>${none.length} เคสยังไม่มีเบาะแสเลย</b>
-        ${none.map(x => esc(x.c.id)).join(' · ')}<br>
+      <div class="warnbox"><b>${none.length} เคสยังไม่มีเบาะแสเลย</b> —
         ทะเบียนพวกนี้ไม่เคยมีซับไหนรับเคลม ไม่มีชื่อคนขับที่ชี้ได้ และไม่อยู่ในรายชื่อรถของซับรายใด
         — ลองนำเข้ารายชื่อรถของซับเพิ่มที่หน้าทะเบียนรถ
-        <button type="button" class="sm" id="unkGoFleet" style="margin-left:6px">ไปหน้าทะเบียนรถ</button></div>
+        <button type="button" class="sm" id="unkGoFleet" style="margin-left:6px">ไปหน้าทะเบียนรถ</button>
+        <button type="button" class="sm" id="unkNoneToggle" style="margin-left:6px">ดูรายการเคส</button>
+        <div id="unkNoneList" hidden style="margin-top:8px">${none.map(x => esc(x.c.id)).join(' · ')}</div>
+      </div>
     </div>` : ''}
   </div>`;
 }
@@ -702,6 +808,25 @@ function bindUnknown(el){
   };
   const go = el.querySelector('#unkGoFleet');
   if(go) go.onclick = () => setView('fleet');
+  const nt = el.querySelector('#unkNoneToggle');
+  if(nt) nt.onclick = () => {
+    const list = el.querySelector('#unkNoneList');
+    list.hidden = !list.hidden;
+    nt.textContent = list.hidden ? 'ดูรายการเคส' : 'ซ่อนรายการเคส';
+  };
+  el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
+  el.querySelectorAll('[data-logtoggle]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const row = b.closest('tr').nextElementSibling;
+    if(row) row.hidden = !row.hidden;
+  });
+  el.querySelectorAll('.logrow [data-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const id = b.closest('[data-logrow]').dataset.logrow;
+    await API.delEvent(id, b.dataset.del);
+    S.events[id] = (S.events[id]||[]).filter(x => x.id !== b.dataset.del);
+    render();
+  });
 }
 
 /* คิวรายชื่อซับที่ต้องถามต่อ เวลาผู้ใช้กด "ถามทั้งหมด" */
