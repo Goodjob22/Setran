@@ -277,17 +277,33 @@ function pullState(){
    แล้ว realtime สะกิดให้ดึงรอบนี้) ข้อมูลที่อ่านมาได้อาจไม่ทันของที่เพิ่งบันทึกไป — ถ้าเอาไปทับ S.cases/
    S.events ตรง ๆ จะเหมือนบันทึกล่าสุดหายไป ทั้งที่จริงบันทึกลงฐานข้อมูลสำเร็จแล้ว จึงต้องเช็คหลังอ่านเสร็จ
    ว่ามีการบันทึกแทรกเข้ามาระหว่างนั้นไหม (writeSeq เปลี่ยนไหม) ถ้ามีก็ดึงใหม่อีกรอบจนกว่าจะได้ชุดที่นิ่งจริง */
+/* Supabase/PostgREST ไม่คืนแถวเกิน 1,000 แถวต่อคำสั่งเดียวเป็นค่าเริ่มต้น (db-max-rows) — พอตาราง events
+   สะสมเกิน 1,000 แถว (เคสหนึ่งมีหลายบันทึก รวมทั้งระบบไม่นานก็เกินแน่นอน) การอ่านแบบ .select('*') เฉย ๆ
+   จะได้แค่ 1,000 แถวแรกเงียบ ๆ ไม่มี error ใด ๆ — เรียง .order('at') แล้วตัดที่ 1,000 แถว แปลว่าตัดเอา
+   "บันทึกเก่าสุด" ไว้ บันทึกใหม่ล่าสุด (เช่น ที่เพิ่งกดรับเคลมไป) จะหายไปจาก S.events ทุกครั้งที่ pullState()
+   ทำงาน ทั้งที่บันทึกลงฐานข้อมูลสำเร็จแล้วจริง ๆ (บั๊กที่เจอจริง: เคสเด้งกลับเป็นเปิดอยู่ทุกครั้งหลังรีเฟรช
+   ไม่ว่าจะกดรับเคลมกี่รอบก็ตาม) จึงต้องดึงเป็นหน้า ๆ (1,000 แถวต่อหน้า) วนจนกว่าจะได้ครบทุกแถวจริง ๆ */
+async function selectAll(label, queryFn){
+  const PAGE = 1000;
+  let all = [], from = 0;
+  while(true){
+    const page = await run(label, () => queryFn().range(from, from + PAGE - 1), false);
+    all = all.concat(page);
+    if(page.length < PAGE) return all;
+    from += PAGE;
+  }
+}
 async function doPullState(){
   for(let attempt = 0; attempt < 5; attempt++){
     const versionAtStart = writeSeq;
     setConn('busy', 'กำลังโหลดข้อมูล…');
     const uid = (await SB.auth.getUser()).data.user?.id || '00000000-0000-0000-0000-000000000000';
     const [cases, events, vendors, trucks, evid, setg, prof] = await Promise.all([
-      run('อ่านเคส',        () => SB.from('cases').select('*'), false),
-      run('อ่านไทม์ไลน์',    () => SB.from('events').select('*').order('at'), false),
-      run('อ่านทะเบียนซับ',  () => SB.from('vendors').select('*'), false),
-      run('อ่านทะเบียนรถ',   () => SB.from('trucks').select('*'), false),
-      run('อ่านหลักฐาน',     () => SB.from('evidence').select('*').order('added_at'), false),
+      selectAll('อ่านเคส',        () => SB.from('cases').select('*')),
+      selectAll('อ่านไทม์ไลน์',    () => SB.from('events').select('*').order('at')),
+      selectAll('อ่านทะเบียนซับ',  () => SB.from('vendors').select('*')),
+      selectAll('อ่านทะเบียนรถ',   () => SB.from('trucks').select('*')),
+      selectAll('อ่านหลักฐาน',     () => SB.from('evidence').select('*').order('added_at')),
       run('อ่านการตั้งค่า',   () => SB.from('settings').select('*').eq('id', 1).maybeSingle(), false),
       run('อ่านโปรไฟล์',     () => SB.from('profiles').select('*').eq('id', uid).maybeSingle(), false),
     ]);
