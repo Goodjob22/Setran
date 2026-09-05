@@ -556,7 +556,7 @@ function showPreview(){
     const j = await API.importTrucks(rows);
     importRows = null; importOpen = false;
     await pullState(); render();
-    toast(`นำเข้าแล้ว — เพิ่มใหม่ ${j.added} · อัปเดต ${j.updated}`);
+    toast(`นำเข้าทะเบียนรถแล้ว ${j.added} รายการ`);
   }
 
   /* รวมชื่อซับเข้าไปในรายชื่อเดิมของแต่ละทะเบียน ไม่ทับของเก่า ไม่แตะ primary/bu */

@@ -33,11 +33,17 @@ function sbErr(e, what){
   return (what ? what + ' — ' : '') + m;
 }
 
-async function run(label, fn){
-  setConn('busy', 'กำลังบันทึก…');
+/* นับจำนวนครั้งที่เขียนฐานข้อมูลสำเร็จ (insert/update/delete) — ไม่นับตอนแค่อ่าน (isWrite=false)
+   ใช้เช็คใน pullState() ว่าตอนที่กำลังโหลดข้อมูลทั้งก้อนอยู่ มีการบันทึกอะไรแทรกเข้ามาระหว่างนั้นไหม
+   ถ้ามี แปลว่าชุดข้อมูลที่เพิ่งโหลดมาอาจเก่ากว่าที่เพิ่งบันทึกไปจริง ต้องดึงใหม่ ไม่งั้นจะเผลอเอาของเก่า
+   ไปเขียนทับสิ่งที่เพิ่งบันทึกสำเร็จทิ้ง (บั๊กที่เจอจริง: เคสที่เพิ่งปิดไปเด้งกลับเป็นเปิดอยู่) */
+let writeSeq = 0;
+async function run(label, fn, isWrite = true){
+  setConn('busy', isWrite ? 'กำลังบันทึก…' : 'กำลังโหลดข้อมูล…');
   try{
     const { data, error } = await fn();
     if(error) throw error;
+    if(isWrite) writeSeq++;
     setConn('on', 'เชื่อมต่อแล้ว');
     return data;
   }catch(e){
@@ -160,7 +166,7 @@ const API = {
   },
   delVendor: code => run('ลบซับ', () => SB.from('vendors').delete().eq('code', code)),
   mergeVendor: async (from, to) => {
-    await run('ย้ายเหตุการณ์', () => SB.from('events').update({ vendor: to }).eq('vendor', from));
+    const moved = await run('ย้ายเหตุการณ์', () => SB.from('events').update({ vendor: to }).eq('vendor', from).select('id'));
     await run('ย้ายทะเบียนรถ', () => SB.from('trucks').update({ primary_vendor: to }).eq('primary_vendor', from));
     const keep = S.vendors[to], gone = S.vendors[from];
     if(keep && gone){
@@ -169,7 +175,7 @@ const API = {
       await API.putVendor(to, { ...keep, aliases });
     }
     await run('ลบซับเดิม', () => SB.from('vendors').delete().eq('code', from));
-    return { ok: true };
+    return { ok: true, moved: (moved || []).length };
   },
 
   /* ทะเบียนรถ */
@@ -266,37 +272,62 @@ function pullState(){
   });
   return pullInFlight;
 }
+/* ต่อให้ pullState() ถูกกันไม่ให้เรียกซ้อนกันแล้ว (ด้านบน) การอ่านชุดนี้ยังใช้เวลาสักครู่ (7 คำสั่งพร้อมกัน)
+   ถ้ามีการบันทึกอะไรเข้ามา "ระหว่าง" ที่กำลังอ่านอยู่พอดี (เช่น เพิ่งกดบันทึกไปก่อนหน้านี้เสี้ยววินาที
+   แล้ว realtime สะกิดให้ดึงรอบนี้) ข้อมูลที่อ่านมาได้อาจไม่ทันของที่เพิ่งบันทึกไป — ถ้าเอาไปทับ S.cases/
+   S.events ตรง ๆ จะเหมือนบันทึกล่าสุดหายไป ทั้งที่จริงบันทึกลงฐานข้อมูลสำเร็จแล้ว จึงต้องเช็คหลังอ่านเสร็จ
+   ว่ามีการบันทึกแทรกเข้ามาระหว่างนั้นไหม (writeSeq เปลี่ยนไหม) ถ้ามีก็ดึงใหม่อีกรอบจนกว่าจะได้ชุดที่นิ่งจริง */
+/* Supabase/PostgREST ไม่คืนแถวเกิน 1,000 แถวต่อคำสั่งเดียวเป็นค่าเริ่มต้น (db-max-rows) — พอตาราง events
+   สะสมเกิน 1,000 แถว (เคสหนึ่งมีหลายบันทึก รวมทั้งระบบไม่นานก็เกินแน่นอน) การอ่านแบบ .select('*') เฉย ๆ
+   จะได้แค่ 1,000 แถวแรกเงียบ ๆ ไม่มี error ใด ๆ — เรียง .order('at') แล้วตัดที่ 1,000 แถว แปลว่าตัดเอา
+   "บันทึกเก่าสุด" ไว้ บันทึกใหม่ล่าสุด (เช่น ที่เพิ่งกดรับเคลมไป) จะหายไปจาก S.events ทุกครั้งที่ pullState()
+   ทำงาน ทั้งที่บันทึกลงฐานข้อมูลสำเร็จแล้วจริง ๆ (บั๊กที่เจอจริง: เคสเด้งกลับเป็นเปิดอยู่ทุกครั้งหลังรีเฟรช
+   ไม่ว่าจะกดรับเคลมกี่รอบก็ตาม) จึงต้องดึงเป็นหน้า ๆ (1,000 แถวต่อหน้า) วนจนกว่าจะได้ครบทุกแถวจริง ๆ */
+async function selectAll(label, queryFn){
+  const PAGE = 1000;
+  let all = [], from = 0;
+  while(true){
+    const page = await run(label, () => queryFn().range(from, from + PAGE - 1), false);
+    all = all.concat(page);
+    if(page.length < PAGE) return all;
+    from += PAGE;
+  }
+}
 async function doPullState(){
-  setConn('busy', 'กำลังโหลดข้อมูล…');
-  const uid = (await SB.auth.getUser()).data.user?.id || '00000000-0000-0000-0000-000000000000';
-  const [cases, events, vendors, trucks, evid, setg, prof] = await Promise.all([
-    run('อ่านเคส',        () => SB.from('cases').select('*')),
-    run('อ่านไทม์ไลน์',    () => SB.from('events').select('*').order('at')),
-    run('อ่านทะเบียนซับ',  () => SB.from('vendors').select('*')),
-    run('อ่านทะเบียนรถ',   () => SB.from('trucks').select('*')),
-    run('อ่านหลักฐาน',     () => SB.from('evidence').select('*').order('added_at')),
-    run('อ่านการตั้งค่า',   () => SB.from('settings').select('*').eq('id', 1).maybeSingle()),
-    run('อ่านโปรไฟล์',     () => SB.from('profiles').select('*').eq('id', uid).maybeSingle()),
-  ]);
+  for(let attempt = 0; attempt < 5; attempt++){
+    const versionAtStart = writeSeq;
+    setConn('busy', 'กำลังโหลดข้อมูล…');
+    const uid = (await SB.auth.getUser()).data.user?.id || '00000000-0000-0000-0000-000000000000';
+    const [cases, events, vendors, trucks, evid, setg, prof] = await Promise.all([
+      selectAll('อ่านเคส',        () => SB.from('cases').select('*')),
+      selectAll('อ่านไทม์ไลน์',    () => SB.from('events').select('*').order('at')),
+      selectAll('อ่านทะเบียนซับ',  () => SB.from('vendors').select('*')),
+      selectAll('อ่านทะเบียนรถ',   () => SB.from('trucks').select('*')),
+      selectAll('อ่านหลักฐาน',     () => SB.from('evidence').select('*').order('added_at')),
+      run('อ่านการตั้งค่า',   () => SB.from('settings').select('*').eq('id', 1).maybeSingle(), false),
+      run('อ่านโปรไฟล์',     () => SB.from('profiles').select('*').eq('id', uid).maybeSingle(), false),
+    ]);
+    if(writeSeq !== versionAtStart && attempt < 4) continue;
 
-  S.cases = {}; S.events = {};
-  for(const c of cases){ S.cases[c.id] = outCase(c); S.events[c.id] = []; }
-  for(const e of events){ (S.events[e.case_id] ||= []).push(outEvent(e)); }
+    S.cases = {}; S.events = {};
+    for(const c of cases){ S.cases[c.id] = outCase(c); S.events[c.id] = []; }
+    for(const e of events){ (S.events[e.case_id] ||= []).push(outEvent(e)); }
 
-  S.vendors = {}; for(const v of vendors) S.vendors[v.code] = v;
-  S.trucks  = {}; for(const t of trucks)  S.trucks[t.key]   = outTruck(t);
+    S.vendors = {}; for(const v of vendors) S.vendors[v.code] = v;
+    S.trucks  = {}; for(const t of trucks)  S.trucks[t.key]   = outTruck(t);
 
-  const evRows = evid.map(outEv);
-  await signAll(evRows);
-  S.evidence = {}; for(const r of evRows) S.evidence[r.id] = r;
+    const evRows = evid.map(outEv);
+    await signAll(evRows);
+    S.evidence = {}; for(const r of evRows) S.evidence[r.id] = r;
 
-  S.settings = (setg && setg.data) || {};
-  S.settings.bus ||= ['MKM','CDC'];
-  S.me = prof ? { username:prof.email, display:prof.display, role:prof.role,
-                  bu:prof.bu, active:prof.active, id:prof.id } : null;
+    S.settings = (setg && setg.data) || {};
+    S.settings.bus ||= ['MKM','CDC'];
+    S.me = prof ? { username:prof.email, display:prof.display, role:prof.role,
+                    bu:prof.bu, active:prof.active, id:prof.id } : null;
 
-  setConn('on', S.me?.bu ? `เชื่อมต่อแล้ว · เห็นเฉพาะ ${S.me.bu}` : 'เชื่อมต่อแล้ว');
-  return S;
+    setConn('on', S.me?.bu ? `เชื่อมต่อแล้ว · เห็นเฉพาะ ${S.me.bu}` : 'เชื่อมต่อแล้ว');
+    return S;
+  }
 }
 
 /* ---------- อัปเดตสด : คนอื่นแก้ แล้วหน้าเราขยับตาม ----------
