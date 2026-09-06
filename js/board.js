@@ -737,6 +737,113 @@ function openOutlookWeb(){
    แผง "ยังไม่รู้ว่าเป็นของซับไหน" ในหน้าคิวต้องส่งวันนี้
    เดิมเคสกลุ่มนี้หายไปเฉย ๆ เพราะไม่มีชื่อซับให้จัดกลุ่ม
    ============================================================ */
+/* ---------- นำเข้าไฟล์ที่รู้ซับแล้ว — พี่ปลาไปไล่หาคำตอบมาเองนอกระบบ (เช่น โทรถามขนส่ง) แล้วมีไฟล์
+   เลขเคลม/ทะเบียน + ซับ พร้อมนำเข้าทีเดียว — จับคู่เคสด้วยเลขเคลมก่อน ถ้าไม่มีคอลัมน์นี้หรือหาไม่เจอค่อยใช้
+   ทะเบียนรถแทน (ต้องเป็นเคสที่ยังเปิดอยู่และยังไม่รู้ซับเท่านั้น) เจอแล้วตั้งซับ + ทำเครื่องหมายรับเคลมให้เลย
+   ทีเดียว — เคสที่มีซับอยู่แล้วในระบบ (ต่อให้อยู่ในไฟล์นี้ด้วย) จะข้ามไปเสมอ ไม่มีวันไปแก้ของเดิมทับ */
+let vendorFileOpen = false, vendorFileRows = null, vendorFileFix = {};
+const VF_ALIASES = {
+  id:     ['เลขเคลม','เลขที่เคลม','claim','claimid','claim id','running claim no.'],
+  truck:  ['ทะเบียน','ทะเบียนรถ','truck','truck no','truck no.','plate'],
+  vendor: ['ซับ','ซัพ','vendor','ผู้รับเคลม'],
+};
+const vfCol = (headers, aliases) => headers.findIndex(h => aliases.includes(h));
+
+function checkVendorFile(){
+  const rows = parseTable(document.getElementById('vfPaste').value);
+  if(rows.length < 2){ toast('ไม่พบข้อมูล — ต้องมีแถวหัวตารางและอย่างน้อย 1 แถวข้อมูล'); return; }
+  const headers = rows[0].map(h => String(h||'').trim().toLowerCase());
+  const idCol = vfCol(headers, VF_ALIASES.id), truckCol = vfCol(headers, VF_ALIASES.truck),
+        vendorCol = vfCol(headers, VF_ALIASES.vendor);
+  if(vendorCol < 0 || (idCol < 0 && truckCol < 0)){
+    toast('หาคอลัมน์ไม่เจอ — ต้องมีคอลัมน์ "ซับ" และอย่างน้อย "เลขเคลม" หรือ "ทะเบียนรถ" อย่างใดอย่างหนึ่ง');
+    return;
+  }
+  vendorFileFix = {};
+  vendorFileRows = rows.slice(1).map(r => {
+    const idRaw = idCol >= 0 ? String(r[idCol]||'').trim() : '';
+    const truckRaw = truckCol >= 0 ? String(r[truckCol]||'').trim() : '';
+    const vendorRaw = vendorCol >= 0 ? String(r[vendorCol]||'').trim() : '';
+    if(!vendorRaw && !idRaw && !truckRaw) return null;
+    let c = idRaw ? allCases().find(x => x.id.toUpperCase() === idRaw.toUpperCase()) : null;
+    if(!c && truckRaw){
+      const k = plateKey(truckRaw);
+      c = allCases().find(x => splitPlates(x.truck).map(plateKey).includes(k)
+        && compute(x).status === 'OPEN' && !compute(x).vendor);
+    }
+    const m = c ? compute(c) : null;
+    const vmatch = vendorRaw ? vendorMatch(vendorRaw) : null;
+    const vendorCode = vmatch ? vmatch.v.code : null;
+    let status;
+    if(!c) status = 'notfound';
+    else if(m.vendor) status = 'skip';
+    else if(!vendorCode) status = 'needvendor';
+    else status = 'ready';
+    return {idRaw, truckRaw, vendorRaw, vendorCode, caseId: c ? c.id : null, status};
+  }).filter(Boolean);
+  renderVendorFilePreview();
+}
+
+function renderVendorFilePreview(){
+  const el = document.getElementById('vfPreview');
+  if(!el) return;
+  const counts = {ready:0, needvendor:0, skip:0, notfound:0};
+  vendorFileRows.forEach(r => counts[r.status]++);
+  const readyN = vendorFileRows.filter((r,i) => r.status === 'ready'
+    || (r.status === 'needvendor' && vendorFileFix[i])).length;
+  el.innerHTML = `
+    <p class="hint" style="margin:10px 0">พร้อมนำเข้า <b style="color:var(--ok)">${readyN}</b> ·
+      ต้องเลือกซับเอง <b>${counts.needvendor}</b> ·
+      ข้าม (มีซับอยู่แล้ว) <b>${counts.skip}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
+    <div class="tw" style="border:0"><table style="min-width:760px"><thead><tr>
+      <th>เลขเคลม/ทะเบียนในไฟล์</th><th>ซับในไฟล์</th><th>จับคู่ซับในระบบ</th>
+      <th>เคสในระบบ</th><th>ผล</th></tr></thead><tbody>
+    ${vendorFileRows.map((r,i) => `<tr>
+      <td class="mono">${esc(r.idRaw || r.truckRaw || '—')}</td>
+      <td>${esc(r.vendorRaw || '—')}</td>
+      <td>${r.status === 'needvendor'
+          ? `<select class="vfFix" data-i="${i}"><option value="">— เลือกเอง —</option>
+              ${vendorNames(true).map(v => `<option ${vendorFileFix[i]===v?'selected':''}>${esc(v)}</option>`).join('')}</select>`
+          : esc(r.vendorCode || '—')}</td>
+      <td class="mono">${r.caseId ? esc(r.caseId) : '<span style="color:var(--bad)">ไม่พบ</span>'}</td>
+      <td>${r.status==='skip' ? '<span class="chip n">มีซับอยู่แล้ว — ข้าม</span>'
+          : r.status==='notfound' ? '<span class="chip bad">ไม่พบเคส</span>'
+          : r.status==='needvendor' ? '<span class="chip warn">ต้องเลือกซับ</span>'
+          : '<span class="chip ok">พร้อมนำเข้า</span>'}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" class="pri" id="vfApply" ${readyN?'':'disabled'}>ยืนยันนำเข้า (${readyN})</button></div>`;
+  el.querySelectorAll('.vfFix').forEach(sel => sel.onchange = () => {
+    vendorFileFix[sel.dataset.i] = sel.value; renderVendorFilePreview();
+  });
+  const ap = document.getElementById('vfApply');
+  if(ap) ap.onclick = applyVendorFile;
+}
+
+async function applyVendorFile(){
+  const ready = vendorFileRows
+    .map((r,i) => ({...r, vendorCode: r.status === 'needvendor' ? vendorFileFix[i] : r.vendorCode}))
+    .filter(r => r.caseId && r.vendorCode && r.status !== 'skip' && r.status !== 'notfound');
+  if(!ready.length){ toast('ไม่มีรายการที่พร้อมนำเข้า'); return; }
+  const at = isoLocal(NOW());
+  suspendLive();
+  try{
+    for(const r of ready){
+      const jf = await API.addEvent(r.caseId, {at, type:'FORWARD', vendor:r.vendorCode,
+        text:`ส่งเมลให้ซับ ${r.vendorCode} (นำเข้าจากไฟล์ที่รู้ซับแล้ว)`});
+      (S.events[r.caseId] ||= []).push(jf.event);
+      const ja = await API.addEvent(r.caseId, {at, type:'ACCEPT', vendor:r.vendorCode,
+        text:'ทำเครื่องหมายซับรับเคลม (นำเข้าจากไฟล์ที่รู้ซับแล้ว)'});
+      (S.events[r.caseId] ||= []).push(ja.event);
+    }
+  } finally { resumeLive(); }
+  await pullState();
+  vendorFileRows = null; vendorFileFix = {}; vendorFileOpen = false;
+  render();
+  toast(`นำเข้าแล้ว ${ready.length} เคส — ตั้งซับและทำเครื่องหมายรับเคลมให้แล้ว`);
+}
+
 function renderUnknownPanel(){
   const list = unknownCases();
   if(!list.length) return '';
@@ -748,7 +855,8 @@ function renderUnknownPanel(){
     <div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
       <span class="chip ${list.length ? 'warn' : 'ok'}">${list.length} เคสค้าง</span>
       <span class="sp">
-        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
+        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}
+        <button type="button" class="sm pri" id="vfOpen">${vendorFileOpen ? 'ปิด' : 'นำเข้าไฟล์ที่รู้ซับแล้ว'}</button></span></div>
 
     <div class="pbody" style="padding:12px 16px 0">
       <p class="hint" style="margin:0">ระบบไล่หาเจ้าของจากหลักฐานที่มี — ทะเบียนที่เคยรับเคลม
@@ -757,6 +865,17 @@ function renderUnknownPanel(){
         เคสที่ทะเบียนชี้ไปซับเดียวชัดเจน (ไม่มีคนอื่นเสมอ) ระบบตั้งซับให้อัตโนมัติแล้วตั้งแต่โหลดหน้า
         จึงเหลือแต่เคสที่ยังไม่แน่ใจให้ไล่ถามในนี้</p>
     </div>
+
+    ${vendorFileOpen ? `<div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 8px">วางตารางจาก Excel (Ctrl+V) — ต้องมีคอลัมน์ <b>เลขเคลม</b> และ/หรือ
+        <b>ทะเบียนรถ</b> อย่างน้อยหนึ่งอย่าง กับคอลัมน์ <b>ซับ</b> (ชื่อคอลัมน์เรียงลำดับไหนก็ได้ ระบบหาเอง)<br>
+        เจอเคสแล้วจะ<b>ตั้งซับและทำเครื่องหมายรับเคลมให้ทันที</b> — เฉพาะเคสที่ยังไม่รู้ซับเท่านั้น
+        เคสที่มีซับอยู่แล้วจะข้ามไป ไม่แตะของเดิม</p>
+      <textarea class="paste" id="vfPaste" placeholder="เลขเคลม&#9;ทะเบียน&#9;ซับ
+MKM-2026-08-00358&#9;72-3215&#9;CS อ่างทอง"></textarea>
+      <div class="actions" style="margin-top:10px"><button type="button" class="pri" id="vfCheck">ตรวจข้อมูล</button></div>
+      <div id="vfPreview"></div>
+    </div>` : ''}
 
     <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
       <table style="min-width:1020px"><thead><tr>
@@ -801,6 +920,10 @@ function renderUnknownPanel(){
 }
 
 function bindUnknown(el){
+  const vfo = el.querySelector('#vfOpen');
+  if(vfo) vfo.onclick = () => { vendorFileOpen = !vendorFileOpen; render(); };
+  const vfc = el.querySelector('#vfCheck');
+  if(vfc) vfc.onclick = checkVendorFile;
   el.querySelectorAll('[data-ask]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     openAskMail(b.dataset.ask);
