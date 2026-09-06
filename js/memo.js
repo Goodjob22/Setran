@@ -20,7 +20,8 @@ function memoSet(){
     if(!vendorPass(m)) return false;
     if(M.scope === 'open'   && m.status !== 'OPEN')   return false;
     if(M.scope === 'closed' && m.status !== 'CLOSED') return false;
-    if(q && ![c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason].join(' ').toLowerCase().includes(q)) return false;
+    if(q && ![c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason,
+      ...m.ev.map(e => e.text)].join(' ').toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -131,7 +132,10 @@ function renderMemo(){
       <p class="hint" style="margin:12px 0 0">ตัวกรองซับ ขนส่ง BU และคำค้น ใช้ร่วมกับแถบด้านบน (ปุ่มสถานะด้านบนซ่อนไว้ที่หน้านี้
         เพราะมี "ขอบเขต" ของตัวเองด้านบนแล้ว) — ตอนนี้กรอง
         <b>${F.vendor==='all'?'ทุกซับ':esc(F.vendor)}</b> · <b>${F.carrier==='all'?'ทุกขนส่ง':F.carrier}</b> ·
-        <b>${F.bu==='all'?'ทุก BU':esc(F.bu)}</b> · ${scopeName} · ${rangeLabel()}${F.q.trim()?` · ค้นหา "${esc(F.q.trim())}"`:''}</p>
+        <b>${F.bu==='all'?'ทุก BU':esc(F.bu)}</b> · ${scopeName} · ${rangeLabel()}${F.q.trim()?` · ค้นหา "${esc(F.q.trim())}"`:''}<br>
+        ช่องค้นหาด้านบนค้นในข้อความบันทึก (Log) ของทุกเคสด้วย ไม่ใช่แค่เลขเคลม/ทะเบียน/สาขา — พิมพ์คำที่มักพิมพ์ไว้ตอนคีย์เคส
+        (เช่น คำที่ใช้บอกว่าสาขายอมรับสินค้าส่วนเกินไว้ขายเอง) แล้วดูยอด "เคสทั้งหมด" กับ "บาท" ด้านล่างได้เลย ไม่ต้องเปิดทีละเคส
+        — ลองพิมพ์คำหลายแบบเทียบกันได้ ถ้าคำไหนได้ตัวเลขที่ตรงกับที่พี่ปลารู้ (เช่น ประมาณ 600 กว่าเคส) แปลว่าคำนั้นใช้ได้</p>
     </div></div>
 
     <div class="totrow">

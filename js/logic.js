@@ -131,7 +131,8 @@ function scopedCache(){
     if(F.status === 'breach' && !(m.status === 'OPEN' && m.sla === 'BREACH')) return false;
     if(F.status === 'flag'   && !m.flags.length) return false;
     if(q){
-      const hay = [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason].join(' ').toLowerCase();
+      const hay = [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason,
+        ...m.ev.map(e => e.text)].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
