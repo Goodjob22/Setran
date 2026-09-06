@@ -284,10 +284,10 @@ function renderQueue(){
                        && (F.status === 'all' || F.status === 'open'
                            || (F.status === 'breach' && m.sla === 'BREACH')
                            || (F.status === 'flag' && m.flags.length))
-                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason]
-                             .join(' ').toLowerCase().includes(q)));
+                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason,
+                             ...m.ev.map(e => e.text)].join(' ').toLowerCase().includes(q)));
   document.getElementById('count').textContent = `${todo.length} เคสในคิว`;
-  const unknownPanel = renderUnknownPanel();
+  const unknownPanel = renderUnknownPanel() + renderNoAmountPanel();
   if(!todo.length){
     el.innerHTML = unknownPanel
       || '<div class="qgroup"><div class="empty">ไม่มีเคสที่ต้องตามวันนี้</div></div>';
@@ -858,6 +858,89 @@ async function applyVendorFile(){
   toast(`นำเข้าแล้ว ${ready.length} เคส — ตั้งซับและทำเครื่องหมายรับเคลมให้แล้ว`);
 }
 
+/* ---------- นำเข้าไฟล์อัปเดตยอดเงิน (เคสที่มีเลขเคลมแล้วแต่ยังไม่มียอด) ----------
+   จับคู่ด้วยเลขเคลมเท่านั้น (ไม่พึ่งทะเบียนเหมือนไฟล์ซับ เพราะที่นี่รู้เลขเคลมอยู่แล้วแน่ ๆ)
+   และแตะเฉพาะเคสที่ "ไม่มียอด" ในระบบเท่านั้น — เคสที่มียอดอยู่แล้วข้ามเสมอ ไม่ทับของเดิม
+   ถ้าจะแก้ยอดที่มีอยู่แล้วให้ใช้ "แก้ไขยอดเคลม" ในหน้าเคสแทน (บังคับใส่เหตุผนทุกครั้ง) */
+let amtFileOpen = false, amtFileRows = null;
+const AF_ALIASES = {
+  id:     VF_ALIASES.id,
+  amount: ['ยอดเงิน','ยอด','ยอดเคลม','ยอดสุทธิ','จำนวนเงิน','net_amt','net amt','amount','amt'],
+};
+
+function checkAmountFile(){
+  const rows = parseTable(document.getElementById('afPaste').value);
+  if(rows.length < 2){ toast('ไม่พบข้อมูล — ต้องมีแถวหัวตารางและอย่างน้อย 1 แถวข้อมูล'); return; }
+  const headers = rows[0].map(h => String(h||'').trim().toLowerCase());
+  const idCol = vfCol(headers, AF_ALIASES.id), amtCol = vfCol(headers, AF_ALIASES.amount);
+  if(idCol < 0 || amtCol < 0){
+    toast('หาคอลัมน์ไม่เจอ — ต้องมีคอลัมน์ "เลขเคลม" และ "ยอดเงิน"');
+    return;
+  }
+  amtFileRows = rows.slice(1).map(r => {
+    const idRaw = String(r[idCol]||'').trim();
+    const amtRaw = String(r[amtCol]||'').trim();
+    if(!idRaw && !amtRaw) return null;
+    const c = idRaw ? allCases().find(x => x.id.toUpperCase() === idRaw.toUpperCase()) : null;
+    const net = amtRaw ? parseAmt(amtRaw) : 0;
+    let status;
+    if(!c) status = 'notfound';
+    else if(c.amount) status = 'hasamount';
+    else if(!net || net <= 0) status = 'invalid';
+    else status = 'ready';
+    return {idRaw, amtRaw, net, caseId: c ? c.id : null, status};
+  }).filter(Boolean);
+  renderAmountFilePreview();
+}
+
+function renderAmountFilePreview(){
+  const el = document.getElementById('afPreview');
+  if(!el) return;
+  const counts = {ready:0, hasamount:0, invalid:0, notfound:0};
+  amtFileRows.forEach(r => counts[r.status]++);
+  el.innerHTML = `
+    <p class="hint" style="margin:10px 0">พร้อมนำเข้า <b style="color:var(--ok)">${counts.ready}</b> ·
+      มียอดอยู่แล้ว — ข้าม <b>${counts.hasamount}</b> ·
+      ยอดในไฟล์อ่านไม่ออก <b>${counts.invalid}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
+    <div class="tw" style="border:0"><table style="min-width:700px"><thead><tr>
+      <th>เลขเคลมในไฟล์</th><th>ยอดในไฟล์</th><th>เคสในระบบ</th><th>ผล</th></tr></thead><tbody>
+    ${amtFileRows.map(r => `<tr>
+      <td class="mono">${esc(r.idRaw || '—')}</td>
+      <td>${esc(r.amtRaw || '—')}</td>
+      <td class="mono">${r.caseId ? esc(r.caseId) : '<span style="color:var(--bad)">ไม่พบ</span>'}</td>
+      <td>${r.status==='hasamount' ? '<span class="chip n">มียอดอยู่แล้ว — ข้าม</span>'
+          : r.status==='notfound' ? '<span class="chip bad">ไม่พบเคส</span>'
+          : r.status==='invalid' ? '<span class="chip bad">ยอดอ่านไม่ออก</span>'
+          : `<span class="chip ok">พร้อมนำเข้า ${baht(r.net)}</span>`}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" class="pri" id="afApply" ${counts.ready?'':'disabled'}>ยืนยันนำเข้า (${counts.ready})</button></div>`;
+  const ap = document.getElementById('afApply');
+  if(ap) ap.onclick = applyAmountFile;
+}
+
+async function applyAmountFile(){
+  const ready = amtFileRows.filter(r => r.status === 'ready');
+  if(!ready.length){ toast('ไม่มีรายการที่พร้อมนำเข้า'); return; }
+  const at = isoLocal(NOW());
+  suspendLive();
+  try{
+    for(const r of ready){
+      const j = await API.addEvent(r.caseId, {at, type:'NOTE', vendor:null,
+        text:`เติมยอดเคลม ${baht(r.net)} บาท (นำเข้าจากไฟล์อัปเดตยอดเงิน — ก่อนหน้านี้ไม่มียอด)`});
+      (S.events[r.caseId] ||= []).push(j.event);
+      await API.patchCase(r.caseId, {amount:r.net});
+      const c = byId(r.caseId);
+      if(c) c.amount = r.net;
+    }
+  } finally { resumeLive(); }
+  await pullState();
+  amtFileRows = null; amtFileOpen = false;
+  render();
+  toast(`เติมยอดเงินให้แล้ว ${ready.length} เคส`);
+}
+
 function renderUnknownPanel(){
   const list = unknownCases();
   const qi = qualityIssueCases();
@@ -986,7 +1069,54 @@ MKM-2026-08-00358&#9;72-3215&#9;CS อ่างทอง"></textarea>
   return `<div class="qgroup" id="unkPanel">${parts.join('')}</div>`;
 }
 
+function renderNoAmountPanel(){
+  const list = noAmountCases();
+  if(!list.length) return '';
+  return `<div class="qgroup" id="amtPanel">
+    <div class="qhead"><h3>มีเลขเคลมแล้วแต่ยังไม่มียอดเงิน</h3>
+      <span class="chip warn">${list.length} เคส</span>
+      <span class="sp"><button type="button" class="sm pri" id="afOpen">${amtFileOpen ? 'ปิด' : 'นำเข้าไฟล์อัปเดตยอดเงิน'}</button></span></div>
+
+    <div class="pbody" style="padding:12px 16px 0">
+      <p class="hint" style="margin:0">เคสพวกนี้คีย์เข้าระบบไว้แล้วแต่ยังไม่มีตัวเลขยอดเคลม (ขึ้น “—” ในตารางเคส)
+        ทำให้ยอดรวมต่าง ๆ (สรุป/Memo, Dashboard) ไม่นับเคสนี้ด้วย — วางไฟล์ที่มีเลขเคลม + ยอดเงิน
+        เพื่อเติมให้ครบได้เลย ไม่ต้องเปิดทีละเคส เคสปิดแล้วก็เติมได้เหมือนกัน</p>
+    </div>
+
+    ${amtFileOpen ? `<div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 8px">วางตารางจาก Excel (Ctrl+V) — ต้องมีคอลัมน์ <b>เลขเคลม</b> และ <b>ยอดเงิน</b>
+        (ชื่อคอลัมน์เรียงลำดับไหนก็ได้ ระบบหาเอง)<br>
+        เติมยอดให้เฉพาะเคสที่<b>ยังไม่มียอด</b>เท่านั้น — เคสที่มียอดอยู่แล้วจะข้ามไป ไม่ทับของเดิม
+        (ถ้าจะแก้ยอดที่มีอยู่แล้ว ใช้ "แก้ไขยอดเคลม" ในหน้าเคสแทน)</p>
+      <textarea class="paste" id="afPaste" placeholder="เลขเคลม&#9;ยอดเงิน
+MKM-2026-08-00464&#9;1234.50"></textarea>
+      <div class="actions" style="margin-top:10px"><button type="button" class="pri" id="afCheck">ตรวจข้อมูล</button></div>
+      <div id="afPreview"></div>
+    </div>` : ''}
+
+    <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
+      <table style="min-width:600px"><thead><tr>
+        <th>เลขเคลม</th><th>สาขา</th><th>สถานะเคส</th><th></th></tr></thead><tbody>
+      ${list.map(({c, m}) => `<tr data-open="${esc(c.id)}">
+        <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
+        <td>${esc(c.store_name || c.store || '—')}</td>
+        <td>${m.status === 'CLOSED' ? '<span class="chip ok">ปิดแล้ว</span>' : '<span class="chip warn">ยังไม่ปิด</span>'}</td>
+        <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+      </tr>
+      <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="4" style="padding:0 0 10px">
+        <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+        <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+      </td></tr>`).join('')}
+      </tbody></table>
+    </div>
+  </div>`;
+}
+
 function bindUnknown(el){
+  const afo = el.querySelector('#afOpen');
+  if(afo) afo.onclick = () => { amtFileOpen = !amtFileOpen; render(); };
+  const afc = el.querySelector('#afCheck');
+  if(afc) afc.onclick = checkAmountFile;
   const vfo = el.querySelector('#vfOpen');
   if(vfo) vfo.onclick = () => { vendorFileOpen = !vendorFileOpen; render(); };
   const vfc = el.querySelector('#vfCheck');

@@ -727,6 +727,16 @@ function qualityIssueCases(){
     .sort((a, b) => b.m.el - a.m.el);
 }
 
+/* เคสที่มีเลขเคลมแล้วแต่ยังไม่มียอดเงิน (amount ว่าง/0) — ไม่จำกัดว่าเปิดหรือปิดอยู่ เพราะเจอได้ทั้งสองแบบ
+   (ปิดเคสไปแล้วก็ยังลืมใส่ยอดได้ เช่น ตอนคีย์เข้าไม่มีเลขในมือ) */
+function noAmountCases(){
+  return CACHE
+    .filter(({c}) => !c.amount)
+    .filter(({c, bu}) => (F.carrier === 'all' || c.carrier === F.carrier)
+                      && (F.bu === 'all' || bu === F.bu))
+    .sort((a, b) => a.c.id < b.c.id ? -1 : 1);
+}
+
 /* จัดกลุ่มตามผู้ต้องสงสัย — เคสหนึ่งอยู่ได้หลายกลุ่ม เพราะต้องถามหลายราย */
 function unknownByVendor(list){
   const g = new Map();
