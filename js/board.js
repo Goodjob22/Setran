@@ -747,6 +747,7 @@ function openOutlookWeb(){
    ถ้าซับในไฟล์ตรงกับที่ระบบมีอยู่แล้วเป๊ะ ๆ ก็ข้ามไปเงียบ ๆ ไม่ต้องเขียนซ้ำ กันบันทึกซ้อนไปเรื่อย ๆ
    ทุกครั้งที่วางไฟล์เดิมซ้ำ (เจอปัญหานี้จริงมาแล้ว — เคสหนึ่งมี ACCEPT ซ้ำกันนับสิบครั้ง) */
 let vendorFileOpen = false, vendorFileRows = null, vendorFileFix = {};
+let qiListOpen = false;
 const VF_ALIASES = {
   id:     ['เลขเคลม','เลขที่เคลม','claim','claimid','claim id','running claim no.'],
   truck:  ['ทะเบียน','ทะเบียนรถ','truck','truck no','truck no.','plate'],
@@ -859,14 +860,16 @@ async function applyVendorFile(){
 
 function renderUnknownPanel(){
   const list = unknownCases();
-  if(!list.length) return '';
+  const qi = qualityIssueCases();
+  if(!list.length && !qi.length) return '';
   const groups = unknownByVendor(list);
   const none = list.filter(x => !x.guess.length);
   const TIER = {1:'เคยรับเคลมทะเบียนนี้', 2:'จากชื่อ พขร.', 3:'จากรายชื่อรถของซับ', 4:'ซับสัมปทาน'};
 
-  return `<div class="qgroup" id="unkPanel">
-    <div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
-      <span class="chip ${list.length ? 'warn' : 'ok'}">${list.length} เคสค้าง</span>
+  const parts = [];
+
+  if(list.length) parts.push(`<div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
+      <span class="chip warn">${list.length} เคสค้าง</span>
       <span class="sp">
         ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}
         <button type="button" class="sm pri" id="vfOpen">${vendorFileOpen ? 'ปิด' : 'นำเข้าไฟล์ที่รู้ซับแล้ว'}</button></span></div>
@@ -928,8 +931,59 @@ MKM-2026-08-00358&#9;72-3215&#9;CS อ่างทอง"></textarea>
         <button type="button" class="sm" id="unkNoneToggle" style="margin-left:6px">ดูรายการเคส</button>
         <div id="unkNoneList" hidden style="margin-top:8px">${none.map(x => esc(x.c.id)).join(' · ')}</div>
       </div>
-    </div>` : ''}
-  </div>`;
+    </div>` : ''}`);
+
+  if(qi.length){
+    const qiTotal = qi.reduce((s,x) => s + (x.c.amount||0), 0);
+    const qiByBU = new Map();
+    for(const x of qi){
+      const k = x.bu || 'ไม่ระบุ BU';
+      if(!qiByBU.has(k)) qiByBU.set(k, {n:0, amount:0});
+      const g = qiByBU.get(k);
+      g.n++; g.amount += x.c.amount||0;
+    }
+    const qiRows = [...qiByBU.entries()].sort((a,b) => b[1].amount - a[1].amount);
+
+    parts.push(`<div class="qhead" style="${list.length ? 'border-top:1px solid var(--rule)' : ''}">
+      <h3>เรียกเก็บไม่ได้ — สินค้าไม่ได้คุณภาพ</h3>
+      <span class="chip bad">${qi.length} เคส · ${baht(qiTotal)}</span></div>
+    <div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 10px">เคสกลุ่มนี้ระบุสาเหตุว่า “สินค้าไม่ได้คุณภาพ” — เป็นปัญหาตัวสินค้าเอง
+        ไม่ใช่ความเสียหายจากการขนส่ง จึง<b>เรียกเก็บกับซับขนส่งไม่ได้</b>ไม่ว่ากรณีใด
+        ระบบเลยไม่เอาไปไล่หาเจ้าของซับให้ (ไม่มีประโยชน์) แค่แยกยอดมาโชว์ไว้ให้ตามไปจัดการต่อเอง
+        เช่น เคลมกับผู้ผลิต/คลังต้นทาง — สถานะเคสยังเป็น OPEN เหมือนเดิม ระบบไม่เปลี่ยนอะไรให้อัตโนมัติ</p>
+      <div class="tw" style="border:0;border-top:1px solid var(--rule)">
+        <table style="min-width:600px"><thead><tr><th>คลัง (BU)</th><th style="text-align:right">จำนวนเคส</th><th style="text-align:right">ยอดรวม</th></tr></thead><tbody>
+          ${qiRows.map(([bu, g]) => `<tr><td>${esc(bu)}</td><td class="r">${g.n}</td><td class="r">${baht(g.amount)}</td></tr>`).join('')}
+          <tr style="font-weight:600"><td>รวมทั้งหมด</td><td class="r">${qi.length}</td><td class="r">${baht(qiTotal)}</td></tr>
+        </tbody></table>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="sm" id="qiToggle">${qiListOpen ? 'ซ่อนรายการเคส' : 'ดูรายการเคส'}</button>
+      </div>
+      <div id="qiList" ${qiListOpen ? '' : 'hidden'} style="margin-top:8px">
+        <div class="tw" style="border:0;border-top:1px solid var(--rule)">
+          <table style="min-width:900px"><thead><tr>
+            <th>เลขเคลม</th><th>คลัง (BU)</th><th>ทะเบียน</th><th style="text-align:right">ยอดเงิน</th><th>ค้างมาแล้ว</th><th></th></tr></thead><tbody>
+          ${qi.map(({c, m, bu}) => `<tr data-open="${esc(c.id)}">
+            <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
+            <td>${esc(bu || '—')}</td>
+            <td>${esc(c.truck || '—')}</td>
+            <td class="r">${c.amount ? baht(c.amount) : '—'}</td>
+            <td class="mono" style="color:var(--bad)">${m.remain < 0 ? 'เกิน ' + hrs(-m.remain) : hrs(m.remain)}</td>
+            <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+          </tr>
+          <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="6" style="padding:0 0 10px">
+            <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+            <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+          </td></tr>`).join('')}
+          </tbody></table>
+        </div>
+      </div>
+    </div>`);
+  }
+
+  return `<div class="qgroup" id="unkPanel">${parts.join('')}</div>`;
 }
 
 function bindUnknown(el){
@@ -955,6 +1009,8 @@ function bindUnknown(el){
     list.hidden = !list.hidden;
     nt.textContent = list.hidden ? 'ดูรายการเคส' : 'ซ่อนรายการเคส';
   };
+  const qit = el.querySelector('#qiToggle');
+  if(qit) qit.onclick = () => { qiListOpen = !qiListOpen; render(); };
   el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
   el.querySelectorAll('[data-logtoggle]').forEach(b => b.onclick = e => {
     e.stopPropagation();

@@ -701,13 +701,29 @@ function bestGuess(c){
   return g[0];
 }
 
-/* เคสค้างที่ยังไม่รู้ซับทั้งหมด พร้อมผู้ต้องสงสัยของแต่ละเคส */
+/* สาเหตุนี้แปลว่าปัญหาอยู่ที่ตัวสินค้าเอง ไม่ใช่การขนส่ง — เรียกเก็บกับซับขนส่งไม่ได้ไม่ว่ากรณีใด
+   จึงแยกออกจากขั้นตอนไล่หาเจ้าของซับ (ดู qualityIssueCases ด้านล่าง) */
+const QUALITY_ISSUE_REASON = 'สินค้าไม่ได้คุณภาพ';
+
+/* เคสค้างที่ยังไม่รู้ซับทั้งหมด พร้อมผู้ต้องสงสัยของแต่ละเคส (ไม่รวมเคส "สินค้าไม่ได้คุณภาพ") */
 function unknownCases(){
   return CACHE
     .filter(({m}) => m.status === 'OPEN' && !m.vendor)
+    .filter(({c}) => c.reason !== QUALITY_ISSUE_REASON)
     .filter(({c, bu}) => (F.carrier === 'all' || c.carrier === F.carrier)
                       && (F.bu === 'all' || bu === F.bu))
     .map(x => ({...x, guess: guessOwner(x.c)}))
+    .sort((a, b) => b.m.el - a.m.el);
+}
+
+/* เคส "สินค้าไม่ได้คุณภาพ" ที่ยังไม่รู้ซับ — แยกยอดไว้ต่างหากเพื่อจัดการต่อ (เช่น เคลมกับผู้ผลิต)
+   ไม่ไล่หาเจ้าของซับให้ เพราะเรียกเก็บกับซับขนส่งไม่ได้อยู่แล้ว */
+function qualityIssueCases(){
+  return CACHE
+    .filter(({m}) => m.status === 'OPEN' && !m.vendor)
+    .filter(({c}) => c.reason === QUALITY_ISSUE_REASON)
+    .filter(({c, bu}) => (F.carrier === 'all' || c.carrier === F.carrier)
+                      && (F.bu === 'all' || bu === F.bu))
     .sort((a, b) => b.m.el - a.m.el);
 }
 
