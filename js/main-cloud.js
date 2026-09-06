@@ -64,6 +64,12 @@ document.querySelectorAll('#viewSeg button').forEach(b => b.onclick = () => setV
 document.querySelectorAll('#statusSeg button').forEach(b => b.onclick = () => { F.status = b.dataset.st; render(); });
 document.querySelectorAll('#carrierSeg button').forEach(b => b.onclick = () => { F.carrier = b.dataset.cr; render(); });
 document.getElementById('q').oninput = e => { F.q = e.target.value; render(); };
+document.getElementById('btnClearFilters').onclick = () => {
+  F.status = 'all'; F.carrier = 'all'; F.bu = 'all'; F.vendor = 'all'; F.q = '';
+  document.getElementById('q').value = '';
+  render();
+  toast('ล้างตัวกรองแล้ว');
+};
 document.querySelectorAll('dialog [data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
 document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if(e.target === d) d.close(); }));
 addEventListener('resize', syncTop);

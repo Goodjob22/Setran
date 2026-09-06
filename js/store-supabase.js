@@ -293,8 +293,12 @@ async function selectAll(label, queryFn){
     from += PAGE;
   }
 }
+/* ตารางใหญ่ขึ้นเรื่อย ๆ (events หลักหมื่นแถวแล้ว) ทำให้ 1 รอบอ่านครบใช้เวลาหลายสิบวินาที — ถ้ามีอะไร
+   เขียนแทรกเข้ามาระหว่างนั้นแล้ว "ดึงใหม่ทั้งหมด" ทุกครั้งไม่จำกัดจำนวนรอบ จะกลายเป็นช้าไม่จบไม่สิ้นถ้ามี
+   ตัวเขียนพื้นหลัง (เช่น autoFillKnownVendors) ทำงานถี่กว่าที่ดึงข้อมูลเสร็จ จึงจำกัดไว้แค่ลองซ้ำ "รอบเดียว"
+   พอ — ถ้ายังไม่นิ่งอีกก็ยอมใช้ชุดล่าสุดไปก่อน (คลาดเคลื่อนเล็กน้อยแค่ช่วงสั้น ๆ ดีกว่าค้างเป็นนาที) */
 async function doPullState(){
-  for(let attempt = 0; attempt < 5; attempt++){
+  for(let attempt = 0; attempt < 2; attempt++){
     const versionAtStart = writeSeq;
     setConn('busy', 'กำลังโหลดข้อมูล…');
     const uid = (await SB.auth.getUser()).data.user?.id || '00000000-0000-0000-0000-000000000000';
@@ -307,7 +311,7 @@ async function doPullState(){
       run('อ่านการตั้งค่า',   () => SB.from('settings').select('*').eq('id', 1).maybeSingle(), false),
       run('อ่านโปรไฟล์',     () => SB.from('profiles').select('*').eq('id', uid).maybeSingle(), false),
     ]);
-    if(writeSeq !== versionAtStart && attempt < 4) continue;
+    if(writeSeq !== versionAtStart && attempt < 1) continue;
 
     S.cases = {}; S.events = {};
     for(const c of cases){ S.cases[c.id] = outCase(c); S.events[c.id] = []; }

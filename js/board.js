@@ -136,6 +136,11 @@ let autoFillBusy = false;
 async function autoFillKnownVendors(){
   if(autoFillBusy) return;
   if(F.view === 'entry' || F.view === 'settings') return;
+  /* ห้ามเขียนขณะที่กำลังมีการดึงข้อมูลทั้งก้อนอยู่พอดี (pullState()) — ตาราง events ใหญ่ขึ้นเรื่อย ๆ
+     ทำให้ 1 รอบดึงใช้เวลาหลายสิบวินาที ถ้าเขียนแทรกเข้าไปตอนนั้น pullState() จะเห็นว่ามีการบันทึกเกิดขึ้น
+     ระหว่างที่กำลังอ่านอยู่แล้วต้องอ่านซ้ำใหม่ทั้งหมด (ดู doPullState()) กลายเป็นช้าไม่จบสักที จึงรอให้
+     รอบที่กำลังดึงอยู่เสร็จก่อน ค่อยลองเขียนใหม่อีกครั้งไม่นานหลังจากนั้น */
+  if(typeof pullInFlight !== 'undefined' && pullInFlight){ setTimeout(autoFillKnownVendors, 5000); return; }
   const all = CACHE.filter(({m}) => m.status === 'OPEN' && !m.vendor)
     .map(x => ({...x, g: bestGuess(x.c)})).filter(x => x.g);
   if(!all.length) return;
