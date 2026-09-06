@@ -739,8 +739,13 @@ function openOutlookWeb(){
    ============================================================ */
 /* ---------- นำเข้าไฟล์ที่รู้ซับแล้ว — พี่ปลาไปไล่หาคำตอบมาเองนอกระบบ (เช่น โทรถามขนส่ง) แล้วมีไฟล์
    เลขเคลม/ทะเบียน + ซับ พร้อมนำเข้าทีเดียว — จับคู่เคสด้วยเลขเคลมก่อน ถ้าไม่มีคอลัมน์นี้หรือหาไม่เจอค่อยใช้
-   ทะเบียนรถแทน (ต้องเป็นเคสที่ยังเปิดอยู่และยังไม่รู้ซับเท่านั้น) เจอแล้วตั้งซับ + ทำเครื่องหมายรับเคลมให้เลย
-   ทีเดียว — เคสที่มีซับอยู่แล้วในระบบ (ต่อให้อยู่ในไฟล์นี้ด้วย) จะข้ามไปเสมอ ไม่มีวันไปแก้ของเดิมทับ */
+   ทะเบียนรถแทน เจอแล้วตั้งซับ + ทำเครื่องหมายรับเคลมให้เลยทีเดียว
+
+   นำเข้าซ้ำได้เสมอ (เช่น แก้ไฟล์เพิ่มแล้ววางใหม่) — เคสที่ "ยังไม่ปิด" (OPEN) จะอัปเดตซับให้ตามไฟล์ล่าสุด
+   เสมอ ต่อให้ตอนนี้มีซับอยู่แล้วจากทางไหนก็ตาม (คนละซับที่เข้าใจผิดตอนแรกก็แก้ได้) ส่วนเคสที่ "ปิดแล้ว"
+   (ยอมรับเคลม/ออก Memo ไปแล้ว) จะไม่แตะเด็ดขาด ป้องกันไม่ให้ไปรื้อเคสที่จบงานแล้ว
+   ถ้าซับในไฟล์ตรงกับที่ระบบมีอยู่แล้วเป๊ะ ๆ ก็ข้ามไปเงียบ ๆ ไม่ต้องเขียนซ้ำ กันบันทึกซ้อนไปเรื่อย ๆ
+   ทุกครั้งที่วางไฟล์เดิมซ้ำ (เจอปัญหานี้จริงมาแล้ว — เคสหนึ่งมี ACCEPT ซ้ำกันนับสิบครั้ง) */
 let vendorFileOpen = false, vendorFileRows = null, vendorFileFix = {};
 const VF_ALIASES = {
   id:     ['เลขเคลม','เลขที่เคลม','claim','claimid','claim id','running claim no.'],
@@ -765,6 +770,9 @@ function checkVendorFile(){
     const truckRaw = truckCol >= 0 ? String(r[truckCol]||'').trim() : '';
     const vendorRaw = vendorCol >= 0 ? String(r[vendorCol]||'').trim() : '';
     if(!vendorRaw && !idRaw && !truckRaw) return null;
+    /* จับคู่ด้วยเลขเคลมตรง ๆ ได้ทุกสถานะ (จะอัปเดตได้ไหมค่อยดูตอนหลัง) — แต่ถ้าไม่มีเลขเคลม ต้องอาศัย
+       ทะเบียนรถแทน กรณีนี้เสี่ยงคลุมเครือถ้าทะเบียนเดียวกันมีหลายเคสค้าง จึงจำกัดไว้แค่เคสที่ยังไม่รู้ซับ
+       เท่านั้น กันเผลอไปทับซับของเคสอื่นที่ทะเบียนเดียวกันแต่คนละเที่ยว */
     let c = idRaw ? allCases().find(x => x.id.toUpperCase() === idRaw.toUpperCase()) : null;
     if(!c && truckRaw){
       const k = plateKey(truckRaw);
@@ -776,10 +784,12 @@ function checkVendorFile(){
     const vendorCode = vmatch ? vmatch.v.code : null;
     let status;
     if(!c) status = 'notfound';
-    else if(m.vendor) status = 'skip';
+    else if(m.status !== 'OPEN') status = 'closed';
     else if(!vendorCode) status = 'needvendor';
+    else if(m.vendor === vendorCode) status = 'unchanged';
     else status = 'ready';
-    return {idRaw, truckRaw, vendorRaw, vendorCode, caseId: c ? c.id : null, status};
+    return {idRaw, truckRaw, vendorRaw, vendorCode, caseId: c ? c.id : null,
+      currentVendor: m ? m.vendor : null, status};
   }).filter(Boolean);
   renderVendorFilePreview();
 }
@@ -787,15 +797,16 @@ function checkVendorFile(){
 function renderVendorFilePreview(){
   const el = document.getElementById('vfPreview');
   if(!el) return;
-  const counts = {ready:0, needvendor:0, skip:0, notfound:0};
+  const counts = {ready:0, needvendor:0, unchanged:0, closed:0, notfound:0};
   vendorFileRows.forEach(r => counts[r.status]++);
   const readyN = vendorFileRows.filter((r,i) => r.status === 'ready'
     || (r.status === 'needvendor' && vendorFileFix[i])).length;
   el.innerHTML = `
     <p class="hint" style="margin:10px 0">พร้อมนำเข้า <b style="color:var(--ok)">${readyN}</b> ·
       ต้องเลือกซับเอง <b>${counts.needvendor}</b> ·
-      ข้าม (มีซับอยู่แล้ว) <b>${counts.skip}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
-    <div class="tw" style="border:0"><table style="min-width:760px"><thead><tr>
+      ตรงกับที่มีอยู่แล้ว — ข้าม <b>${counts.unchanged}</b> ·
+      ปิดเคสแล้ว — ไม่แตะ <b>${counts.closed}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
+    <div class="tw" style="border:0"><table style="min-width:820px"><thead><tr>
       <th>เลขเคลม/ทะเบียนในไฟล์</th><th>ซับในไฟล์</th><th>จับคู่ซับในระบบ</th>
       <th>เคสในระบบ</th><th>ผล</th></tr></thead><tbody>
     ${vendorFileRows.map((r,i) => `<tr>
@@ -806,9 +817,11 @@ function renderVendorFilePreview(){
               ${vendorNames(true).map(v => `<option ${vendorFileFix[i]===v?'selected':''}>${esc(v)}</option>`).join('')}</select>`
           : esc(r.vendorCode || '—')}</td>
       <td class="mono">${r.caseId ? esc(r.caseId) : '<span style="color:var(--bad)">ไม่พบ</span>'}</td>
-      <td>${r.status==='skip' ? '<span class="chip n">มีซับอยู่แล้ว — ข้าม</span>'
+      <td>${r.status==='closed' ? '<span class="chip n">ปิดเคสแล้ว — ไม่แตะ</span>'
+          : r.status==='unchanged' ? '<span class="chip n">ตรงกับที่มีอยู่แล้ว</span>'
           : r.status==='notfound' ? '<span class="chip bad">ไม่พบเคส</span>'
           : r.status==='needvendor' ? '<span class="chip warn">ต้องเลือกซับ</span>'
+          : r.currentVendor ? `<span class="chip warn">เปลี่ยนซับจาก ${esc(r.currentVendor)}</span>`
           : '<span class="chip ok">พร้อมนำเข้า</span>'}</td>
     </tr>`).join('')}
     </tbody></table></div>
@@ -824,7 +837,7 @@ function renderVendorFilePreview(){
 async function applyVendorFile(){
   const ready = vendorFileRows
     .map((r,i) => ({...r, vendorCode: r.status === 'needvendor' ? vendorFileFix[i] : r.vendorCode}))
-    .filter(r => r.caseId && r.vendorCode && r.status !== 'skip' && r.status !== 'notfound');
+    .filter(r => r.caseId && r.vendorCode && r.status !== 'closed' && r.status !== 'unchanged' && r.status !== 'notfound');
   if(!ready.length){ toast('ไม่มีรายการที่พร้อมนำเข้า'); return; }
   const at = isoLocal(NOW());
   suspendLive();
