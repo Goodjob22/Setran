@@ -136,6 +136,11 @@ let autoFillBusy = false;
 async function autoFillKnownVendors(){
   if(autoFillBusy) return;
   if(F.view === 'entry' || F.view === 'settings') return;
+  /* ห้ามเขียนขณะที่กำลังมีการดึงข้อมูลทั้งก้อนอยู่พอดี (pullState()) — ตาราง events ใหญ่ขึ้นเรื่อย ๆ
+     ทำให้ 1 รอบดึงใช้เวลาหลายสิบวินาที ถ้าเขียนแทรกเข้าไปตอนนั้น pullState() จะเห็นว่ามีการบันทึกเกิดขึ้น
+     ระหว่างที่กำลังอ่านอยู่แล้วต้องอ่านซ้ำใหม่ทั้งหมด (ดู doPullState()) กลายเป็นช้าไม่จบสักที จึงรอให้
+     รอบที่กำลังดึงอยู่เสร็จก่อน ค่อยลองเขียนใหม่อีกครั้งไม่นานหลังจากนั้น */
+  if(typeof pullInFlight !== 'undefined' && pullInFlight){ setTimeout(autoFillKnownVendors, 5000); return; }
   const all = CACHE.filter(({m}) => m.status === 'OPEN' && !m.vendor)
     .map(x => ({...x, g: bestGuess(x.c)})).filter(x => x.g);
   if(!all.length) return;
@@ -279,10 +284,10 @@ function renderQueue(){
                        && (F.status === 'all' || F.status === 'open'
                            || (F.status === 'breach' && m.sla === 'BREACH')
                            || (F.status === 'flag' && m.flags.length))
-                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason]
-                             .join(' ').toLowerCase().includes(q)));
+                       && (!q || [c.id, c.store, c.store_name, c.truck, c.driver, m.vendor, c.reason,
+                             ...m.ev.map(e => e.text)].join(' ').toLowerCase().includes(q)));
   document.getElementById('count').textContent = `${todo.length} เคสในคิว`;
-  const unknownPanel = renderUnknownPanel();
+  const unknownPanel = renderUnknownPanel() + renderNoAmountPanel();
   if(!todo.length){
     el.innerHTML = unknownPanel
       || '<div class="qgroup"><div class="empty">ไม่มีเคสที่ต้องตามวันนี้</div></div>';
@@ -322,6 +327,47 @@ function renderQueue(){
 
 /* ---------- หน้ารายละเอียดเคส ---------- */
 let openId = null;
+let itemsEditOpen = false, itemsDraft = null;
+
+/* รายการสินค้าในหน้าเคส — โหมดอ่านอย่างเดียว หรือโหมดแก้ไข (ระหว่างแก้ไขเก็บ draft ไว้ต่างหาก
+   ไม่แตะ c.items ตรง ๆ จนกว่าจะกด "บันทึก" กันเผลอ patchCase ครึ่ง ๆ กลาง ๆ ถ้าเน็ตหลุดกลางทาง) */
+function renderItemsBlock(c){
+  if(itemsEditOpen){
+    const sum = itemsDraft.reduce((s,it) => s + (parseFloat(it.amt) || 0), 0);
+    const sumNote = c.amount && Math.round(sum*100) !== Math.round(c.amount*100)
+      ? ` — ต่างจากยอดเคลมที่บันทึกไว้ (${baht(c.amount)}) ไม่เป็นไร สองอย่างนี้ไม่ได้ผูกกัน แก้ยอดเคลมแยกได้ที่ช่อง "แก้ไขยอดเคลม" ด้านล่าง`
+      : '';
+    return `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า
+        <button type="button" class="sm gh" id="itmCancel" style="margin-left:8px">ยกเลิก</button></div>
+      <div class="tw" style="margin:0 0 10px"><table style="min-width:620px"><thead><tr>
+        <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:90px;text-align:right">จำนวน</th>
+        <th style="width:120px;text-align:right">ยอด (บาท)</th><th style="width:36px"></th></tr></thead><tbody>
+        ${itemsDraft.length ? itemsDraft.map((it,i) => `<tr>
+          <td><input type="text" class="itmCode" data-i="${i}" value="${esc(it.code||'')}"></td>
+          <td><input type="text" class="itmName" data-i="${i}" value="${esc(it.name||'')}"></td>
+          <td><input type="text" class="itmQty r" data-i="${i}" value="${esc(it.qty_diff??'')}"></td>
+          <td><input type="text" class="itmAmt r" data-i="${i}" inputmode="decimal" value="${esc(it.amt??'')}"></td>
+          <td><button type="button" class="sm gh itmDel" data-i="${i}" title="ลบรายการนี้" style="color:var(--bad)">×</button></td>
+        </tr>`).join('') : `<tr><td colspan="5" class="hint" style="padding:10px">ยังไม่มีรายการสินค้า — กด "+ เพิ่มรายการ" ด้านล่าง</td></tr>`}
+      </tbody></table></div>
+      <div class="actions" style="margin:0 0 16px">
+        <button type="button" class="sm" id="itmAdd">+ เพิ่มรายการ</button>
+        <button type="button" class="pri" id="itmSave">บันทึกรายการสินค้า</button>
+        <span class="hint" style="margin:0">ยอดรวมรายการ ${baht(sum)} บาท${sumNote}</span>
+      </div>`;
+  }
+  const items = c.items || [];
+  return `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${items.length} รายการ)
+      <button type="button" class="sm gh" id="itmEdit" style="margin-left:8px">แก้ไขรายการสินค้า</button></div>
+    ${items.length ? `<div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
+      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
+      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
+      ${items.map(it => `<tr style="cursor:default">
+        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
+        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
+        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
+    </tbody></table></div>` : `<p class="hint" style="margin:0 0 16px">ยังไม่มีรายการสินค้าในเคสนี้</p>`}`;
+}
 async function addEvent(id, e){
   const j = await API.addEvent(id, e);
   (S.events[id] ||= []).push(j.event);
@@ -349,15 +395,7 @@ function openCase(id){
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
 
-    ${(c.items||[]).length ? `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${c.items.length} รายการ)</div>
-    <div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
-      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
-      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
-      ${c.items.map(it => `<tr style="cursor:default">
-        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
-        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
-        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
-    </tbody></table></div>` : ''}
+    ${renderItemsBlock(c)}
 
     <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร. / ซับ</legend>
       <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด — เปลี่ยนซับที่นี่จะบันทึกเป็นบันทึกเหตุการณ์ "ส่งเมลให้ซับ" ให้อัตโนมัติ</p>
@@ -542,6 +580,41 @@ function openCase(id){
     await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
     c.amount = net; c.ex_vat = ex; c.vat = vat;
     render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
+  const itmEdit = document.getElementById('itmEdit');
+  if(itmEdit) itmEdit.onclick = () => {
+    itemsEditOpen = true;
+    itemsDraft = (c.items||[]).map(it => ({...it}));
+    openCase(c.id);
+  };
+  const itmCancel = document.getElementById('itmCancel');
+  if(itmCancel) itmCancel.onclick = () => { itemsEditOpen = false; itemsDraft = null; openCase(c.id); };
+  const itmAdd = document.getElementById('itmAdd');
+  if(itmAdd) itmAdd.onclick = () => {
+    itemsDraft.push({code:'', name:'', qty_load:'', qty_rec:'', qty_diff:'', amt:null});
+    openCase(c.id);
+  };
+  document.querySelectorAll('.itmDel').forEach(b => b.onclick = () => {
+    itemsDraft.splice(+b.dataset.i, 1); openCase(c.id);
+  });
+  document.querySelectorAll('.itmCode').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].code = inp.value; });
+  document.querySelectorAll('.itmName').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].name = inp.value; });
+  document.querySelectorAll('.itmQty').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].qty_diff = inp.value; });
+  document.querySelectorAll('.itmAmt').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].amt = inp.value; });
+  const itmSave = document.getElementById('itmSave');
+  if(itmSave) itmSave.onclick = async () => {
+    const cleaned = itemsDraft
+      .map(it => ({
+        code: String(it.code||'').trim(), name: String(it.name||'').trim(),
+        qty_load: it.qty_load ?? '', qty_rec: it.qty_rec ?? '',
+        qty_diff: String(it.qty_diff??'').trim(),
+        amt: it.amt !== '' && it.amt != null && !isNaN(parseFloat(it.amt)) ? Math.round(parseFloat(it.amt)*100)/100 : null,
+      }))
+      .filter(it => it.code || it.name || it.qty_diff || it.amt != null);
+    await API.patchCase(c.id, {items:cleaned});
+    c.items = cleaned;
+    itemsEditOpen = false; itemsDraft = null;
+    render(); openCase(c.id); toast('บันทึกรายการสินค้าแล้ว');
   };
   const lDriverList = document.getElementById('lDriverList');
   if(lDriverList) lDriverList.innerHTML = [...driverMap().values()]
@@ -732,18 +805,225 @@ function openOutlookWeb(){
    แผง "ยังไม่รู้ว่าเป็นของซับไหน" ในหน้าคิวต้องส่งวันนี้
    เดิมเคสกลุ่มนี้หายไปเฉย ๆ เพราะไม่มีชื่อซับให้จัดกลุ่ม
    ============================================================ */
+/* ---------- นำเข้าไฟล์ที่รู้ซับแล้ว — พี่ปลาไปไล่หาคำตอบมาเองนอกระบบ (เช่น โทรถามขนส่ง) แล้วมีไฟล์
+   เลขเคลม/ทะเบียน + ซับ พร้อมนำเข้าทีเดียว — จับคู่เคสด้วยเลขเคลมก่อน ถ้าไม่มีคอลัมน์นี้หรือหาไม่เจอค่อยใช้
+   ทะเบียนรถแทน เจอแล้วตั้งซับ + ทำเครื่องหมายรับเคลมให้เลยทีเดียว
+
+   นำเข้าซ้ำได้เสมอ (เช่น แก้ไฟล์เพิ่มแล้ววางใหม่) — เคสที่ "ยังไม่ปิด" (OPEN) จะอัปเดตซับให้ตามไฟล์ล่าสุด
+   เสมอ ต่อให้ตอนนี้มีซับอยู่แล้วจากทางไหนก็ตาม (คนละซับที่เข้าใจผิดตอนแรกก็แก้ได้) ส่วนเคสที่ "ปิดแล้ว"
+   (ยอมรับเคลม/ออก Memo ไปแล้ว) จะไม่แตะเด็ดขาด ป้องกันไม่ให้ไปรื้อเคสที่จบงานแล้ว
+   ถ้าซับในไฟล์ตรงกับที่ระบบมีอยู่แล้วเป๊ะ ๆ ก็ข้ามไปเงียบ ๆ ไม่ต้องเขียนซ้ำ กันบันทึกซ้อนไปเรื่อย ๆ
+   ทุกครั้งที่วางไฟล์เดิมซ้ำ (เจอปัญหานี้จริงมาแล้ว — เคสหนึ่งมี ACCEPT ซ้ำกันนับสิบครั้ง) */
+let vendorFileOpen = false, vendorFileRows = null, vendorFileFix = {};
+let qiListOpen = false;
+const VF_ALIASES = {
+  id:     ['เลขเคลม','เลขที่เคลม','claim','claimid','claim id','running claim no.'],
+  truck:  ['ทะเบียน','ทะเบียนรถ','truck','truck no','truck no.','plate'],
+  vendor: ['ซับ','ซัพ','vendor','ผู้รับเคลม'],
+};
+const vfCol = (headers, aliases) => headers.findIndex(h => aliases.includes(h));
+
+function checkVendorFile(){
+  const rows = parseTable(document.getElementById('vfPaste').value);
+  if(rows.length < 2){ toast('ไม่พบข้อมูล — ต้องมีแถวหัวตารางและอย่างน้อย 1 แถวข้อมูล'); return; }
+  const headers = rows[0].map(h => String(h||'').trim().toLowerCase());
+  const idCol = vfCol(headers, VF_ALIASES.id), truckCol = vfCol(headers, VF_ALIASES.truck),
+        vendorCol = vfCol(headers, VF_ALIASES.vendor);
+  if(vendorCol < 0 || (idCol < 0 && truckCol < 0)){
+    toast('หาคอลัมน์ไม่เจอ — ต้องมีคอลัมน์ "ซับ" และอย่างน้อย "เลขเคลม" หรือ "ทะเบียนรถ" อย่างใดอย่างหนึ่ง');
+    return;
+  }
+  vendorFileFix = {};
+  vendorFileRows = rows.slice(1).map(r => {
+    const idRaw = idCol >= 0 ? String(r[idCol]||'').trim() : '';
+    const truckRaw = truckCol >= 0 ? String(r[truckCol]||'').trim() : '';
+    const vendorRaw = vendorCol >= 0 ? String(r[vendorCol]||'').trim() : '';
+    if(!vendorRaw && !idRaw && !truckRaw) return null;
+    /* จับคู่ด้วยเลขเคลมตรง ๆ ได้ทุกสถานะ (จะอัปเดตได้ไหมค่อยดูตอนหลัง) — แต่ถ้าไม่มีเลขเคลม ต้องอาศัย
+       ทะเบียนรถแทน กรณีนี้เสี่ยงคลุมเครือถ้าทะเบียนเดียวกันมีหลายเคสค้าง จึงจำกัดไว้แค่เคสที่ยังไม่รู้ซับ
+       เท่านั้น กันเผลอไปทับซับของเคสอื่นที่ทะเบียนเดียวกันแต่คนละเที่ยว */
+    let c = idRaw ? allCases().find(x => x.id.toUpperCase() === idRaw.toUpperCase()) : null;
+    if(!c && truckRaw){
+      const k = plateKey(truckRaw);
+      c = allCases().find(x => splitPlates(x.truck).map(plateKey).includes(k)
+        && compute(x).status === 'OPEN' && !compute(x).vendor);
+    }
+    const m = c ? compute(c) : null;
+    const vmatch = vendorRaw ? vendorMatch(vendorRaw) : null;
+    const vendorCode = vmatch ? vmatch.v.code : null;
+    let status;
+    if(!c) status = 'notfound';
+    else if(m.status !== 'OPEN') status = 'closed';
+    else if(!vendorCode) status = 'needvendor';
+    else if(m.vendor === vendorCode) status = 'unchanged';
+    else status = 'ready';
+    return {idRaw, truckRaw, vendorRaw, vendorCode, caseId: c ? c.id : null,
+      currentVendor: m ? m.vendor : null, status};
+  }).filter(Boolean);
+  renderVendorFilePreview();
+}
+
+function renderVendorFilePreview(){
+  const el = document.getElementById('vfPreview');
+  if(!el) return;
+  const counts = {ready:0, needvendor:0, unchanged:0, closed:0, notfound:0};
+  vendorFileRows.forEach(r => counts[r.status]++);
+  const readyN = vendorFileRows.filter((r,i) => r.status === 'ready'
+    || (r.status === 'needvendor' && vendorFileFix[i])).length;
+  el.innerHTML = `
+    <p class="hint" style="margin:10px 0">พร้อมนำเข้า <b style="color:var(--ok)">${readyN}</b> ·
+      ต้องเลือกซับเอง <b>${counts.needvendor}</b> ·
+      ตรงกับที่มีอยู่แล้ว — ข้าม <b>${counts.unchanged}</b> ·
+      ปิดเคสแล้ว — ไม่แตะ <b>${counts.closed}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
+    <div class="tw" style="border:0"><table style="min-width:820px"><thead><tr>
+      <th>เลขเคลม/ทะเบียนในไฟล์</th><th>ซับในไฟล์</th><th>จับคู่ซับในระบบ</th>
+      <th>เคสในระบบ</th><th>ผล</th></tr></thead><tbody>
+    ${vendorFileRows.map((r,i) => `<tr>
+      <td class="mono">${esc(r.idRaw || r.truckRaw || '—')}</td>
+      <td>${esc(r.vendorRaw || '—')}</td>
+      <td>${r.status === 'needvendor'
+          ? `<select class="vfFix" data-i="${i}"><option value="">— เลือกเอง —</option>
+              ${vendorNames(true).map(v => `<option ${vendorFileFix[i]===v?'selected':''}>${esc(v)}</option>`).join('')}</select>`
+          : esc(r.vendorCode || '—')}</td>
+      <td class="mono">${r.caseId ? esc(r.caseId) : '<span style="color:var(--bad)">ไม่พบ</span>'}</td>
+      <td>${r.status==='closed' ? '<span class="chip n">ปิดเคสแล้ว — ไม่แตะ</span>'
+          : r.status==='unchanged' ? '<span class="chip n">ตรงกับที่มีอยู่แล้ว</span>'
+          : r.status==='notfound' ? '<span class="chip bad">ไม่พบเคส</span>'
+          : r.status==='needvendor' ? '<span class="chip warn">ต้องเลือกซับ</span>'
+          : r.currentVendor ? `<span class="chip warn">เปลี่ยนซับจาก ${esc(r.currentVendor)}</span>`
+          : '<span class="chip ok">พร้อมนำเข้า</span>'}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" class="pri" id="vfApply" ${readyN?'':'disabled'}>ยืนยันนำเข้า (${readyN})</button></div>`;
+  el.querySelectorAll('.vfFix').forEach(sel => sel.onchange = () => {
+    vendorFileFix[sel.dataset.i] = sel.value; renderVendorFilePreview();
+  });
+  const ap = document.getElementById('vfApply');
+  if(ap) ap.onclick = applyVendorFile;
+}
+
+async function applyVendorFile(){
+  const ready = vendorFileRows
+    .map((r,i) => ({...r, vendorCode: r.status === 'needvendor' ? vendorFileFix[i] : r.vendorCode}))
+    .filter(r => r.caseId && r.vendorCode && r.status !== 'closed' && r.status !== 'unchanged' && r.status !== 'notfound');
+  if(!ready.length){ toast('ไม่มีรายการที่พร้อมนำเข้า'); return; }
+  const at = isoLocal(NOW());
+  suspendLive();
+  try{
+    for(const r of ready){
+      const jf = await API.addEvent(r.caseId, {at, type:'FORWARD', vendor:r.vendorCode,
+        text:`ส่งเมลให้ซับ ${r.vendorCode} (นำเข้าจากไฟล์ที่รู้ซับแล้ว)`});
+      (S.events[r.caseId] ||= []).push(jf.event);
+      const ja = await API.addEvent(r.caseId, {at, type:'ACCEPT', vendor:r.vendorCode,
+        text:'ทำเครื่องหมายซับรับเคลม (นำเข้าจากไฟล์ที่รู้ซับแล้ว)'});
+      (S.events[r.caseId] ||= []).push(ja.event);
+    }
+  } finally { resumeLive(); }
+  await pullState();
+  vendorFileRows = null; vendorFileFix = {}; vendorFileOpen = false;
+  render();
+  toast(`นำเข้าแล้ว ${ready.length} เคส — ตั้งซับและทำเครื่องหมายรับเคลมให้แล้ว`);
+}
+
+/* ---------- นำเข้าไฟล์อัปเดตยอดเงิน (เคสที่มีเลขเคลมแล้วแต่ยังไม่มียอด) ----------
+   จับคู่ด้วยเลขเคลมเท่านั้น (ไม่พึ่งทะเบียนเหมือนไฟล์ซับ เพราะที่นี่รู้เลขเคลมอยู่แล้วแน่ ๆ)
+   และแตะเฉพาะเคสที่ "ไม่มียอด" ในระบบเท่านั้น — เคสที่มียอดอยู่แล้วข้ามเสมอ ไม่ทับของเดิม
+   ถ้าจะแก้ยอดที่มีอยู่แล้วให้ใช้ "แก้ไขยอดเคลม" ในหน้าเคสแทน (บังคับใส่เหตุผนทุกครั้ง) */
+let amtFileOpen = false, amtFileRows = null;
+const AF_ALIASES = {
+  id:     VF_ALIASES.id,
+  amount: ['ยอดเงิน','ยอด','ยอดเคลม','ยอดสุทธิ','จำนวนเงิน','net_amt','net amt','amount','amt'],
+};
+
+function checkAmountFile(){
+  const rows = parseTable(document.getElementById('afPaste').value);
+  if(rows.length < 2){ toast('ไม่พบข้อมูล — ต้องมีแถวหัวตารางและอย่างน้อย 1 แถวข้อมูล'); return; }
+  const headers = rows[0].map(h => String(h||'').trim().toLowerCase());
+  const idCol = vfCol(headers, AF_ALIASES.id), amtCol = vfCol(headers, AF_ALIASES.amount);
+  if(idCol < 0 || amtCol < 0){
+    toast('หาคอลัมน์ไม่เจอ — ต้องมีคอลัมน์ "เลขเคลม" และ "ยอดเงิน"');
+    return;
+  }
+  amtFileRows = rows.slice(1).map(r => {
+    const idRaw = String(r[idCol]||'').trim();
+    const amtRaw = String(r[amtCol]||'').trim();
+    if(!idRaw && !amtRaw) return null;
+    const c = idRaw ? allCases().find(x => x.id.toUpperCase() === idRaw.toUpperCase()) : null;
+    const net = amtRaw ? parseAmt(amtRaw) : 0;
+    let status;
+    if(!c) status = 'notfound';
+    else if(c.amount) status = 'hasamount';
+    else if(!net || net <= 0) status = 'invalid';
+    else status = 'ready';
+    return {idRaw, amtRaw, net, caseId: c ? c.id : null, status};
+  }).filter(Boolean);
+  renderAmountFilePreview();
+}
+
+function renderAmountFilePreview(){
+  const el = document.getElementById('afPreview');
+  if(!el) return;
+  const counts = {ready:0, hasamount:0, invalid:0, notfound:0};
+  amtFileRows.forEach(r => counts[r.status]++);
+  el.innerHTML = `
+    <p class="hint" style="margin:10px 0">พร้อมนำเข้า <b style="color:var(--ok)">${counts.ready}</b> ·
+      มียอดอยู่แล้ว — ข้าม <b>${counts.hasamount}</b> ·
+      ยอดในไฟล์อ่านไม่ออก <b>${counts.invalid}</b> · ไม่พบเคสในระบบ <b>${counts.notfound}</b></p>
+    <div class="tw" style="border:0"><table style="min-width:700px"><thead><tr>
+      <th>เลขเคลมในไฟล์</th><th>ยอดในไฟล์</th><th>เคสในระบบ</th><th>ผล</th></tr></thead><tbody>
+    ${amtFileRows.map(r => `<tr>
+      <td class="mono">${esc(r.idRaw || '—')}</td>
+      <td>${esc(r.amtRaw || '—')}</td>
+      <td class="mono">${r.caseId ? esc(r.caseId) : '<span style="color:var(--bad)">ไม่พบ</span>'}</td>
+      <td>${r.status==='hasamount' ? '<span class="chip n">มียอดอยู่แล้ว — ข้าม</span>'
+          : r.status==='notfound' ? '<span class="chip bad">ไม่พบเคส</span>'
+          : r.status==='invalid' ? '<span class="chip bad">ยอดอ่านไม่ออก</span>'
+          : `<span class="chip ok">พร้อมนำเข้า ${baht(r.net)}</span>`}</td>
+    </tr>`).join('')}
+    </tbody></table></div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" class="pri" id="afApply" ${counts.ready?'':'disabled'}>ยืนยันนำเข้า (${counts.ready})</button></div>`;
+  const ap = document.getElementById('afApply');
+  if(ap) ap.onclick = applyAmountFile;
+}
+
+async function applyAmountFile(){
+  const ready = amtFileRows.filter(r => r.status === 'ready');
+  if(!ready.length){ toast('ไม่มีรายการที่พร้อมนำเข้า'); return; }
+  const at = isoLocal(NOW());
+  suspendLive();
+  try{
+    for(const r of ready){
+      const j = await API.addEvent(r.caseId, {at, type:'NOTE', vendor:null,
+        text:`เติมยอดเคลม ${baht(r.net)} บาท (นำเข้าจากไฟล์อัปเดตยอดเงิน — ก่อนหน้านี้ไม่มียอด)`});
+      (S.events[r.caseId] ||= []).push(j.event);
+      await API.patchCase(r.caseId, {amount:r.net});
+      const c = byId(r.caseId);
+      if(c) c.amount = r.net;
+    }
+  } finally { resumeLive(); }
+  await pullState();
+  amtFileRows = null; amtFileOpen = false;
+  render();
+  toast(`เติมยอดเงินให้แล้ว ${ready.length} เคส`);
+}
+
 function renderUnknownPanel(){
   const list = unknownCases();
-  if(!list.length) return '';
+  const qi = qualityIssueCases();
+  if(!list.length && !qi.length) return '';
   const groups = unknownByVendor(list);
   const none = list.filter(x => !x.guess.length);
   const TIER = {1:'เคยรับเคลมทะเบียนนี้', 2:'จากชื่อ พขร.', 3:'จากรายชื่อรถของซับ', 4:'ซับสัมปทาน'};
 
-  return `<div class="qgroup" id="unkPanel">
-    <div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
-      <span class="chip ${list.length ? 'warn' : 'ok'}">${list.length} เคสค้าง</span>
+  const parts = [];
+
+  if(list.length) parts.push(`<div class="qhead"><h3>ยังไม่รู้ว่าเป็นของซับไหน</h3>
+      <span class="chip warn">${list.length} เคสค้าง</span>
       <span class="sp">
-        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}</span></div>
+        ${groups.length ? `<button type="button" class="sm" id="unkAskAll">ร่างเมลถามทั้ง ${groups.length} ราย</button>` : ''}
+        <button type="button" class="sm pri" id="vfOpen">${vendorFileOpen ? 'ปิด' : 'นำเข้าไฟล์ที่รู้ซับแล้ว'}</button></span></div>
 
     <div class="pbody" style="padding:12px 16px 0">
       <p class="hint" style="margin:0">ระบบไล่หาเจ้าของจากหลักฐานที่มี — ทะเบียนที่เคยรับเคลม
@@ -752,6 +1032,17 @@ function renderUnknownPanel(){
         เคสที่ทะเบียนชี้ไปซับเดียวชัดเจน (ไม่มีคนอื่นเสมอ) ระบบตั้งซับให้อัตโนมัติแล้วตั้งแต่โหลดหน้า
         จึงเหลือแต่เคสที่ยังไม่แน่ใจให้ไล่ถามในนี้</p>
     </div>
+
+    ${vendorFileOpen ? `<div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 8px">วางตารางจาก Excel (Ctrl+V) — ต้องมีคอลัมน์ <b>เลขเคลม</b> และ/หรือ
+        <b>ทะเบียนรถ</b> อย่างน้อยหนึ่งอย่าง กับคอลัมน์ <b>ซับ</b> (ชื่อคอลัมน์เรียงลำดับไหนก็ได้ ระบบหาเอง)<br>
+        เจอเคสแล้วจะ<b>ตั้งซับและทำเครื่องหมายรับเคลมให้ทันที</b> — เฉพาะเคสที่ยังไม่รู้ซับเท่านั้น
+        เคสที่มีซับอยู่แล้วจะข้ามไป ไม่แตะของเดิม</p>
+      <textarea class="paste" id="vfPaste" placeholder="เลขเคลม&#9;ทะเบียน&#9;ซับ
+MKM-2026-08-00358&#9;72-3215&#9;CS อ่างทอง"></textarea>
+      <div class="actions" style="margin-top:10px"><button type="button" class="pri" id="vfCheck">ตรวจข้อมูล</button></div>
+      <div id="vfPreview"></div>
+    </div>` : ''}
 
     <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
       <table style="min-width:1020px"><thead><tr>
@@ -791,11 +1082,113 @@ function renderUnknownPanel(){
         <button type="button" class="sm" id="unkNoneToggle" style="margin-left:6px">ดูรายการเคส</button>
         <div id="unkNoneList" hidden style="margin-top:8px">${none.map(x => esc(x.c.id)).join(' · ')}</div>
       </div>
+    </div>` : ''}`);
+
+  if(qi.length){
+    const qiTotal = qi.reduce((s,x) => s + (x.c.amount||0), 0);
+    const qiByBU = new Map();
+    for(const x of qi){
+      const k = x.bu || 'ไม่ระบุ BU';
+      if(!qiByBU.has(k)) qiByBU.set(k, {n:0, amount:0});
+      const g = qiByBU.get(k);
+      g.n++; g.amount += x.c.amount||0;
+    }
+    const qiRows = [...qiByBU.entries()].sort((a,b) => b[1].amount - a[1].amount);
+
+    parts.push(`<div class="qhead" style="${list.length ? 'border-top:1px solid var(--rule)' : ''}">
+      <h3>เรียกเก็บไม่ได้ — สินค้าไม่ได้คุณภาพ</h3>
+      <span class="chip bad">${qi.length} เคส · ${baht(qiTotal)}</span></div>
+    <div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 10px">เคสกลุ่มนี้ระบุสาเหตุว่า “สินค้าไม่ได้คุณภาพ” — เป็นปัญหาตัวสินค้าเอง
+        ไม่ใช่ความเสียหายจากการขนส่ง จึง<b>เรียกเก็บกับซับขนส่งไม่ได้</b>ไม่ว่ากรณีใด
+        ระบบเลยไม่เอาไปไล่หาเจ้าของซับให้ (ไม่มีประโยชน์) แค่แยกยอดมาโชว์ไว้ให้ตามไปจัดการต่อเอง
+        เช่น เคลมกับผู้ผลิต/คลังต้นทาง — สถานะเคสยังเป็น OPEN เหมือนเดิม ระบบไม่เปลี่ยนอะไรให้อัตโนมัติ</p>
+      <div class="tw" style="border:0;border-top:1px solid var(--rule)">
+        <table style="min-width:600px"><thead><tr><th>คลัง (BU)</th><th style="text-align:right">จำนวนเคส</th><th style="text-align:right">ยอดรวม</th></tr></thead><tbody>
+          ${qiRows.map(([bu, g]) => `<tr><td>${esc(bu)}</td><td class="r">${g.n}</td><td class="r">${baht(g.amount)}</td></tr>`).join('')}
+          <tr style="font-weight:600"><td>รวมทั้งหมด</td><td class="r">${qi.length}</td><td class="r">${baht(qiTotal)}</td></tr>
+        </tbody></table>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button type="button" class="sm" id="qiToggle">${qiListOpen ? 'ซ่อนรายการเคส' : 'ดูรายการเคส'}</button>
+      </div>
+      <div id="qiList" ${qiListOpen ? '' : 'hidden'} style="margin-top:8px">
+        <div class="tw" style="border:0;border-top:1px solid var(--rule)">
+          <table style="min-width:900px"><thead><tr>
+            <th>เลขเคลม</th><th>คลัง (BU)</th><th>ทะเบียน</th><th style="text-align:right">ยอดเงิน</th><th>ค้างมาแล้ว</th><th></th></tr></thead><tbody>
+          ${qi.map(({c, m, bu}) => `<tr data-open="${esc(c.id)}">
+            <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
+            <td>${esc(bu || '—')}</td>
+            <td>${esc(c.truck || '—')}</td>
+            <td class="r">${c.amount ? baht(c.amount) : '—'}</td>
+            <td class="mono" style="color:var(--bad)">${m.remain < 0 ? 'เกิน ' + hrs(-m.remain) : hrs(m.remain)}</td>
+            <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+          </tr>
+          <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="6" style="padding:0 0 10px">
+            <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+            <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+          </td></tr>`).join('')}
+          </tbody></table>
+        </div>
+      </div>
+    </div>`);
+  }
+
+  return `<div class="qgroup" id="unkPanel">${parts.join('')}</div>`;
+}
+
+function renderNoAmountPanel(){
+  const list = noAmountCases();
+  if(!list.length) return '';
+  return `<div class="qgroup" id="amtPanel">
+    <div class="qhead"><h3>มีเลขเคลมแล้วแต่ยังไม่มียอดเงิน</h3>
+      <span class="chip warn">${list.length} เคส</span>
+      <span class="sp"><button type="button" class="sm pri" id="afOpen">${amtFileOpen ? 'ปิด' : 'นำเข้าไฟล์อัปเดตยอดเงิน'}</button></span></div>
+
+    <div class="pbody" style="padding:12px 16px 0">
+      <p class="hint" style="margin:0">เคสพวกนี้คีย์เข้าระบบไว้แล้วแต่ยังไม่มีตัวเลขยอดเคลม (ขึ้น “—” ในตารางเคส)
+        ทำให้ยอดรวมต่าง ๆ (สรุป/Memo, Dashboard) ไม่นับเคสนี้ด้วย — วางไฟล์ที่มีเลขเคลม + ยอดเงิน
+        เพื่อเติมให้ครบได้เลย ไม่ต้องเปิดทีละเคส เคสปิดแล้วก็เติมได้เหมือนกัน</p>
+    </div>
+
+    ${amtFileOpen ? `<div class="pbody" style="padding:12px 16px">
+      <p class="hint" style="margin:0 0 8px">วางตารางจาก Excel (Ctrl+V) — ต้องมีคอลัมน์ <b>เลขเคลม</b> และ <b>ยอดเงิน</b>
+        (ชื่อคอลัมน์เรียงลำดับไหนก็ได้ ระบบหาเอง)<br>
+        เติมยอดให้เฉพาะเคสที่<b>ยังไม่มียอด</b>เท่านั้น — เคสที่มียอดอยู่แล้วจะข้ามไป ไม่ทับของเดิม
+        (ถ้าจะแก้ยอดที่มีอยู่แล้ว ใช้ "แก้ไขยอดเคลม" ในหน้าเคสแทน)</p>
+      <textarea class="paste" id="afPaste" placeholder="เลขเคลม&#9;ยอดเงิน
+MKM-2026-08-00464&#9;1234.50"></textarea>
+      <div class="actions" style="margin-top:10px"><button type="button" class="pri" id="afCheck">ตรวจข้อมูล</button></div>
+      <div id="afPreview"></div>
     </div>` : ''}
+
+    <div class="tw" style="border:0;border-top:1px solid var(--rule);margin-top:12px">
+      <table style="min-width:600px"><thead><tr>
+        <th>เลขเคลม</th><th>สาขา</th><th>สถานะเคส</th><th></th></tr></thead><tbody>
+      ${list.map(({c, m}) => `<tr data-open="${esc(c.id)}">
+        <td class="id">${esc(c.id)}<span class="sub">${c.carrier}</span></td>
+        <td>${esc(c.store_name || c.store || '—')}</td>
+        <td>${m.status === 'CLOSED' ? '<span class="chip ok">ปิดแล้ว</span>' : '<span class="chip warn">ยังไม่ปิด</span>'}</td>
+        <td onclick="event.stopPropagation()"><button type="button" class="sm gh" data-logtoggle="${esc(c.id)}">Log</button></td>
+      </tr>
+      <tr class="logrow" data-logrow="${esc(c.id)}" hidden><td colspan="4" style="padding:0 0 10px">
+        <div class="slabel" style="margin:0 0 4px">บันทึกเหตุการณ์ (Log)</div>
+        <div class="tline">${m.ev.map((e,i) => evHtml(e,i,m)).join('') || '<p class="hint">ยังไม่มีบันทึก</p>'}</div>
+      </td></tr>`).join('')}
+      </tbody></table>
+    </div>
   </div>`;
 }
 
 function bindUnknown(el){
+  const afo = el.querySelector('#afOpen');
+  if(afo) afo.onclick = () => { amtFileOpen = !amtFileOpen; render(); };
+  const afc = el.querySelector('#afCheck');
+  if(afc) afc.onclick = checkAmountFile;
+  const vfo = el.querySelector('#vfOpen');
+  if(vfo) vfo.onclick = () => { vendorFileOpen = !vendorFileOpen; render(); };
+  const vfc = el.querySelector('#vfCheck');
+  if(vfc) vfc.onclick = checkVendorFile;
   el.querySelectorAll('[data-ask]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     openAskMail(b.dataset.ask);
@@ -814,6 +1207,8 @@ function bindUnknown(el){
     list.hidden = !list.hidden;
     nt.textContent = list.hidden ? 'ดูรายการเคส' : 'ซ่อนรายการเคส';
   };
+  const qit = el.querySelector('#qiToggle');
+  if(qit) qit.onclick = () => { qiListOpen = !qiListOpen; render(); };
   el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openCase(b.dataset.open));
   el.querySelectorAll('[data-logtoggle]').forEach(b => b.onclick = e => {
     e.stopPropagation();
