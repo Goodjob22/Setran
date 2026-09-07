@@ -327,6 +327,47 @@ function renderQueue(){
 
 /* ---------- หน้ารายละเอียดเคส ---------- */
 let openId = null;
+let itemsEditOpen = false, itemsDraft = null;
+
+/* รายการสินค้าในหน้าเคส — โหมดอ่านอย่างเดียว หรือโหมดแก้ไข (ระหว่างแก้ไขเก็บ draft ไว้ต่างหาก
+   ไม่แตะ c.items ตรง ๆ จนกว่าจะกด "บันทึก" กันเผลอ patchCase ครึ่ง ๆ กลาง ๆ ถ้าเน็ตหลุดกลางทาง) */
+function renderItemsBlock(c){
+  if(itemsEditOpen){
+    const sum = itemsDraft.reduce((s,it) => s + (parseFloat(it.amt) || 0), 0);
+    const sumNote = c.amount && Math.round(sum*100) !== Math.round(c.amount*100)
+      ? ` — ต่างจากยอดเคลมที่บันทึกไว้ (${baht(c.amount)}) ไม่เป็นไร สองอย่างนี้ไม่ได้ผูกกัน แก้ยอดเคลมแยกได้ที่ช่อง "แก้ไขยอดเคลม" ด้านล่าง`
+      : '';
+    return `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า
+        <button type="button" class="sm gh" id="itmCancel" style="margin-left:8px">ยกเลิก</button></div>
+      <div class="tw" style="margin:0 0 10px"><table style="min-width:620px"><thead><tr>
+        <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:90px;text-align:right">จำนวน</th>
+        <th style="width:120px;text-align:right">ยอด (บาท)</th><th style="width:36px"></th></tr></thead><tbody>
+        ${itemsDraft.length ? itemsDraft.map((it,i) => `<tr>
+          <td><input type="text" class="itmCode" data-i="${i}" value="${esc(it.code||'')}"></td>
+          <td><input type="text" class="itmName" data-i="${i}" value="${esc(it.name||'')}"></td>
+          <td><input type="text" class="itmQty r" data-i="${i}" value="${esc(it.qty_diff??'')}"></td>
+          <td><input type="text" class="itmAmt r" data-i="${i}" inputmode="decimal" value="${esc(it.amt??'')}"></td>
+          <td><button type="button" class="sm gh itmDel" data-i="${i}" title="ลบรายการนี้" style="color:var(--bad)">×</button></td>
+        </tr>`).join('') : `<tr><td colspan="5" class="hint" style="padding:10px">ยังไม่มีรายการสินค้า — กด "+ เพิ่มรายการ" ด้านล่าง</td></tr>`}
+      </tbody></table></div>
+      <div class="actions" style="margin:0 0 16px">
+        <button type="button" class="sm" id="itmAdd">+ เพิ่มรายการ</button>
+        <button type="button" class="pri" id="itmSave">บันทึกรายการสินค้า</button>
+        <span class="hint" style="margin:0">ยอดรวมรายการ ${baht(sum)} บาท${sumNote}</span>
+      </div>`;
+  }
+  const items = c.items || [];
+  return `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${items.length} รายการ)
+      <button type="button" class="sm gh" id="itmEdit" style="margin-left:8px">แก้ไขรายการสินค้า</button></div>
+    ${items.length ? `<div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
+      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
+      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
+      ${items.map(it => `<tr style="cursor:default">
+        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
+        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
+        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
+    </tbody></table></div>` : `<p class="hint" style="margin:0 0 16px">ยังไม่มีรายการสินค้าในเคสนี้</p>`}`;
+}
 async function addEvent(id, e){
   const j = await API.addEvent(id, e);
   (S.events[id] ||= []).push(j.event);
@@ -354,15 +395,7 @@ function openCase(id){
       <div class="kv"><div class="k">สถานะ</div><div class="v">${statusChip(m)}</div></div>
     </div>
 
-    ${(c.items||[]).length ? `<div class="slabel" style="margin:16px 0 8px">รายการสินค้า (${c.items.length} รายการ)</div>
-    <div class="tw" style="margin:0 0 16px"><table style="min-width:520px"><thead><tr>
-      <th style="width:110px">รหัส</th><th>ชื่อสินค้า</th><th style="width:80px;text-align:right">จำนวน</th>
-      <th style="width:120px;text-align:right">ยอด (บาท)</th></tr></thead><tbody>
-      ${c.items.map(it => `<tr style="cursor:default">
-        <td class="mono">${esc(it.code||'—')}</td><td>${esc(it.name||'—')}</td>
-        <td class="r" style="${(+it.qty_diff)<0?'color:var(--bad)':''}">${it.qty_diff!==''&&it.qty_diff!=null?esc(it.qty_diff):'—'}</td>
-        <td class="r">${it.amt!=null?baht(it.amt):'—'}</td></tr>`).join('')}
-    </tbody></table></div>` : ''}
+    ${renderItemsBlock(c)}
 
     <fieldset><legend>แก้ไขสาขา / ทะเบียนรถ / พขร. / ซับ</legend>
       <p class="hint">ใช้เติมข้อมูลที่ไฟล์นำเข้าไม่มีให้ หรือแก้ถ้าพิมพ์ผิด — เปลี่ยนซับที่นี่จะบันทึกเป็นบันทึกเหตุการณ์ "ส่งเมลให้ซับ" ให้อัตโนมัติ</p>
@@ -547,6 +580,41 @@ function openCase(id){
     await API.patchCase(c.id, {amount:net, ex_vat:ex, vat});
     c.amount = net; c.ex_vat = ex; c.vat = vat;
     render(); openCase(c.id); toast('แก้ยอดเคลมแล้ว');
+  };
+  const itmEdit = document.getElementById('itmEdit');
+  if(itmEdit) itmEdit.onclick = () => {
+    itemsEditOpen = true;
+    itemsDraft = (c.items||[]).map(it => ({...it}));
+    openCase(c.id);
+  };
+  const itmCancel = document.getElementById('itmCancel');
+  if(itmCancel) itmCancel.onclick = () => { itemsEditOpen = false; itemsDraft = null; openCase(c.id); };
+  const itmAdd = document.getElementById('itmAdd');
+  if(itmAdd) itmAdd.onclick = () => {
+    itemsDraft.push({code:'', name:'', qty_load:'', qty_rec:'', qty_diff:'', amt:null});
+    openCase(c.id);
+  };
+  document.querySelectorAll('.itmDel').forEach(b => b.onclick = () => {
+    itemsDraft.splice(+b.dataset.i, 1); openCase(c.id);
+  });
+  document.querySelectorAll('.itmCode').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].code = inp.value; });
+  document.querySelectorAll('.itmName').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].name = inp.value; });
+  document.querySelectorAll('.itmQty').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].qty_diff = inp.value; });
+  document.querySelectorAll('.itmAmt').forEach(inp => inp.oninput = () => { itemsDraft[+inp.dataset.i].amt = inp.value; });
+  const itmSave = document.getElementById('itmSave');
+  if(itmSave) itmSave.onclick = async () => {
+    const cleaned = itemsDraft
+      .map(it => ({
+        code: String(it.code||'').trim(), name: String(it.name||'').trim(),
+        qty_load: it.qty_load ?? '', qty_rec: it.qty_rec ?? '',
+        qty_diff: String(it.qty_diff??'').trim(),
+        amt: it.amt !== '' && it.amt != null && !isNaN(parseFloat(it.amt)) ? Math.round(parseFloat(it.amt)*100)/100 : null,
+      }))
+      .filter(it => it.code || it.name || it.qty_diff || it.amt != null);
+    await API.patchCase(c.id, {items:cleaned});
+    c.items = cleaned;
+    itemsEditOpen = false; itemsDraft = null;
+    render(); openCase(c.id); toast('บันทึกรายการสินค้าแล้ว');
   };
   const lDriverList = document.getElementById('lDriverList');
   if(lDriverList) lDriverList.innerHTML = [...driverMap().values()]
